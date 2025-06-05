@@ -147,6 +147,14 @@ namespace XppInterpreter.Interpreter
             functionDeclaration.Block.Accept(this);
         }
 
+        public virtual void VisitClassDeclaration(ClassDeclaration classDeclaration)
+        {
+            foreach (var method in classDeclaration.Methods)
+            {
+                method.Accept(this);
+            }
+        }
+
         public virtual void VisitIf(If @if)
         {
             @if.Expression?.Accept(this);

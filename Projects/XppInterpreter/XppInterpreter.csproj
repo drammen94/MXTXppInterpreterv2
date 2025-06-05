@@ -200,6 +200,7 @@
     <Compile Include="Parser\Data\Setting.cs" />
     <Compile Include="Parser\DeleteFrom.cs" />
     <Compile Include="Parser\FunctionDeclaration.cs" />
+    <Compile Include="Parser\ClassDeclaration.cs" />
     <Compile Include="Parser\FunctionDeclarationParameter.cs" />
     <Compile Include="Parser\InsertRecordset.cs" />
     <Compile Include="Parser\ParseContext.cs" />
