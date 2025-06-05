@@ -1,3 +1,4 @@
+using System;
 using XppInterpreter.Interpreter.Proxy;
 
 namespace TestHarness.Mock
@@ -7,5 +8,12 @@ namespace TestHarness.Mock
         public void TtsBegin() { }
         public void TtsCommit() { }
         public void TtsAbort() { }
+
+        public IDisposable CreateChangeCompanyHandler(string datAreaId)
+        {
+            return null;
+        }
+
+        public void Next(object common) { }
     }
 }

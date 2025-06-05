@@ -13,7 +13,7 @@ namespace TestHarness
     {
         static void Main(string[] args)
         {
-            string source = @"class Hello { public static str greet() { return \"hi\"; } } return Hello::greet();";
+            string source = "class Hello { public static str greet() { return \"hi\"; } } return Hello::greet();";
 
             var (proxy, reflection, functions) = BuildProxy();
             var lexer = new XppLexer(source);
@@ -21,7 +21,7 @@ namespace TestHarness
             var result = parser.Parse();
             var programAst = result.AST as XppInterpreter.Parser.Program;
 
-            var generator = new ByteCodeGenerator(proxy);
+            var generator = new ByteCodeGenerator();
             var byteCode = generator.Generate(programAst, false);
 
             foreach (var f in byteCode.DeclaredFunctions)
@@ -30,9 +30,11 @@ namespace TestHarness
             reflection.SetProxy(proxy);
 
             var interpreter = new XppInterpreter.Interpreter.XppInterpreter(proxy);
-            var interpreterResult = interpreter.Interpret(byteCode);
+            var context = new RuntimeContext(proxy, byteCode);
+            interpreter.Interpret(byteCode, context);
 
-            Console.WriteLine($"Result: {interpreterResult.Value}");
+            var resultValue = context.Stack.Count > 0 ? context.Stack.Pop() : null;
+            Console.WriteLine($"Result: {resultValue}");
         }
 
         static (XppProxy, MockReflectionProxy, Dictionary<string, RefFunction>) BuildProxy()
