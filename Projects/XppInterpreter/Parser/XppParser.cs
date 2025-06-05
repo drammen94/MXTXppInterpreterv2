@@ -1057,6 +1057,7 @@ namespace XppInterpreter.Parser
                     return LoopControl();
                 case TType.Switch: return Switch();
                 case TType.ChangeCompany: return ChangeCompany();
+                case TType.Class: return ClassDeclaration();
                 case TType.Var:
                 case TType.TypeStr:
                 case TType.TypeDate:
@@ -1089,7 +1090,7 @@ namespace XppInterpreter.Parser
             }
         }
 
-        internal FunctionDeclaration FunctionDeclaration()
+        internal FunctionDeclaration FunctionDeclaration(string namePrefix = null)
         {
             var start = MatchMultiple(
                 TType.Id,
@@ -1114,11 +1115,12 @@ namespace XppInterpreter.Parser
             }
 
             Word funcNameToken = Match(TType.Id).Token as Word;
+            string fullName = namePrefix is null ? funcNameToken.Lexeme : $"{namePrefix}.{funcNameToken.Lexeme}";
 
             Match(TType.LeftParenthesis);
 
             _parseContext.FunctionDeclarationStack.New();
-            _parseContext.CurrentScope.FunctionReferences.Add(new FunctionDeclarationReference((funcNameToken).Lexeme, type));
+            _parseContext.CurrentScope.FunctionReferences.Add(new FunctionDeclarationReference(fullName, type));
             _parseContext.CurrentScope.Begin();
 
             var parameters = new List<FunctionDeclarationParameter>();
@@ -1139,7 +1141,7 @@ namespace XppInterpreter.Parser
             _parseContext.CurrentScope.End();
 
             var ret = new FunctionDeclaration(
-                ((Word)funcNameToken).Lexeme,
+                fullName,
                 start.Token,
                 parameters,
                 block,
@@ -1182,6 +1184,27 @@ namespace XppInterpreter.Parser
                 new ParseContextScopeVariable(id.Lexeme, type, inferedType, false));
 
             return new FunctionDeclarationParameter(type, inferedType, id.Lexeme, SourceCodeBinding(typeResult, lastScanResult));
+        }
+
+        internal ClassDeclaration ClassDeclaration()
+        {
+            var start = currentScanResult;
+
+            Match(TType.Class);
+            Word name = Match(TType.Id).Token as Word;
+
+            Match(TType.LeftBrace);
+
+            var methods = new List<FunctionDeclaration>();
+            _parseContext.BeginScope();
+            while (currentToken.TokenType != TType.RightBrace && currentToken.TokenType != TType.EOF)
+            {
+                methods.Add(FunctionDeclaration(name.Lexeme));
+            }
+            Match(TType.RightBrace);
+            _parseContext.EndScope();
+
+            return new ClassDeclaration(name.Lexeme, methods, SourceCodeBinding(start, lastScanResult));
         }
 
         internal ChangeCompany ChangeCompany()

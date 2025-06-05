@@ -714,6 +714,14 @@ namespace XppInterpreter.Interpreter.Bytecode
             refFunction.Instructions = blockScope.Instructions;
         }
 
+        public void VisitClassDeclaration(ClassDeclaration classDeclaration)
+        {
+            foreach (var method in classDeclaration.Methods)
+            {
+                VisitFunctionDeclaration(method);
+            }
+        }
+
         public void VisitReturn(Parser.Return @return)
         {
             EmitDebugSymbol(@return);
