@@ -38,6 +38,7 @@ namespace XppInterpreter.Interpreter
         void VisitVariableDeclarations(VariableDeclarations variableDeclaration);
         void VisitTry(Try @try);
         void VisitRetry(Retry retry);
+        void VisitClassDeclaration(ClassDeclaration classDeclaration);
         void VisitUsing(Using @using);
     }
 }
