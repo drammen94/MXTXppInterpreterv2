@@ -3,6 +3,7 @@ namespace TestHarness.Mock
 {
     class MockIntrinsicFunctionProvider : XppInterpreter.Interpreter.Proxy.IIntrinsicFunctionProvider
     {
+        public Type GetCustomPredefinedFunctionProvider() => null;
         public int classNum(string name) { return default; }
         public string classStr(string name) { return default; }
         public string formStr(string name) { return default; }
