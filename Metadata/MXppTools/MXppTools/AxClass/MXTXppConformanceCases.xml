@@ -1,0 +1,347 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppConformanceCases</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Conformance cases for MXTXppConformance. Each static method whose name starts with
+/// "case" is compiled natively and also interpreted from its own source text, so a case
+/// is written once and both executions are guaranteed to run the same code. Report every
+/// observable value through MXTXppConformance::emit. Add cases for any semantics the
+/// interpreter evaluates itself instead of delegating to the native runtime.
+/// </summary>
+public final class MXTXppConformanceCases
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>caseIntOverflowAdd</Name>
+				<Source><![CDATA[
+    public static void caseIntOverflowAdd()
+    {
+        int value = maxInt();
+        value = value + 1;
+        MXTXppConformance::emit(value);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseIntOverflowIncrement</Name>
+				<Source><![CDATA[
+    public static void caseIntOverflowIncrement()
+    {
+        int value = maxInt();
+        value++;
+        MXTXppConformance::emit(value);
+        value = minInt();
+        value--;
+        MXTXppConformance::emit(value);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseIntOverflowMultiply</Name>
+				<Source><![CDATA[
+    public static void caseIntOverflowMultiply()
+    {
+        int value = 65536;
+        value = value * 65536;
+        MXTXppConformance::emit(value);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseInt64Overflow</Name>
+				<Source><![CDATA[
+    public static void caseInt64Overflow()
+    {
+        int64 value = 4611686018427387904;
+        value = value + value;
+        MXTXppConformance::emit(value);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseIntArithmetic</Name>
+				<Source><![CDATA[
+    public static void caseIntArithmetic()
+    {
+        int a = 7;
+        int b = -3;
+        MXTXppConformance::emit(a + b);
+        MXTXppConformance::emit(a - b);
+        MXTXppConformance::emit(a * b);
+        MXTXppConformance::emit(a & 3);
+        MXTXppConformance::emit(a | 8);
+        MXTXppConformance::emit(a ^ 2);
+        MXTXppConformance::emit(a > b);
+        MXTXppConformance::emit(a >= 7);
+        MXTXppConformance::emit(b < a);
+        MXTXppConformance::emit(b <= -3);
+        MXTXppConformance::emit(a == b);
+        MXTXppConformance::emit(a != b);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseIntDivisionAndModulo</Name>
+				<Source><![CDATA[
+    public static void caseIntDivisionAndModulo()
+    {
+        int a = -7;
+        int b = 2;
+        MXTXppConformance::emit(a div b);
+        MXTXppConformance::emit(a mod b);
+        MXTXppConformance::emit(7 div -2);
+        MXTXppConformance::emit(7 mod -2);
+        MXTXppConformance::emit(7 / 2);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseMixedIntegerWidths</Name>
+				<Source><![CDATA[
+    public static void caseMixedIntegerWidths()
+    {
+        int a = 5;
+        int64 b = 3;
+        MXTXppConformance::emit(a + b);
+        MXTXppConformance::emit(a * b);
+        MXTXppConformance::emit(a > b);
+        MXTXppConformance::emit(a == 5.0);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseRealArithmetic</Name>
+				<Source><![CDATA[
+    public static void caseRealArithmetic()
+    {
+        real sum = 0.1 + 0.2;
+        MXTXppConformance::emit(sum);
+        MXTXppConformance::emit(sum == 0.3);
+        MXTXppConformance::emit(1.0 / 3.0);
+        MXTXppConformance::emit(10 / 4);
+        MXTXppConformance::emit(2.5 * 2);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseStringComparison</Name>
+				<Source><![CDATA[
+    public static void caseStringComparison()
+    {
+        MXTXppConformance::emit('abc' == 'ABC');
+        MXTXppConformance::emit('abc' != 'ABD');
+        MXTXppConformance::emit('abc' < 'abd');
+        MXTXppConformance::emit('b' > 'A');
+        MXTXppConformance::emit('abc' + 'def');
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseStringEdtTruncation</Name>
+				<Source><![CDATA[
+    public static void caseStringEdtTruncation()
+    {
+        Name name = strRep('x', 500);
+        MXTXppConformance::emit(strLen(name));
+        str unbounded = strRep('x', 500);
+        MXTXppConformance::emit(strLen(unbounded));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseDefaultValues</Name>
+				<Source><![CDATA[
+    public static void caseDefaultValues()
+    {
+        int i;
+        int64 i64;
+        real r;
+        str s;
+        boolean b;
+        date d;
+        container c;
+        MXTXppConformance::emit(i);
+        MXTXppConformance::emit(i64);
+        MXTXppConformance::emit(r);
+        MXTXppConformance::emit(s == '');
+        MXTXppConformance::emit(b);
+        MXTXppConformance::emit(d == dateNull());
+        MXTXppConformance::emit(conLen(c));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseBooleanConversion</Name>
+				<Source><![CDATA[
+    public static void caseBooleanConversion()
+    {
+        boolean fromInt = 5;
+        boolean fromZero = 0;
+        MXTXppConformance::emit(fromInt);
+        MXTXppConformance::emit(fromZero);
+        MXTXppConformance::emit(!fromInt);
+        if (3)
+        {
+            MXTXppConformance::emit('int condition is true');
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseEnumValues</Name>
+				<Source><![CDATA[
+    public static void caseEnumValues()
+    {
+        NoYes value = NoYes::Yes;
+        MXTXppConformance::emit(value);
+        MXTXppConformance::emit(value == 1);
+        MXTXppConformance::emit(enum2Str(value));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseDates</Name>
+				<Source><![CDATA[
+    public static void caseDates()
+    {
+        date value = mkDate(28, 2, 2024);
+        MXTXppConformance::emit(value + 1);
+        MXTXppConformance::emit(value + 2);
+        MXTXppConformance::emit(mkDate(1, 3, 2024) - value);
+        MXTXppConformance::emit(dayOfWk(value));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseContainers</Name>
+				<Source><![CDATA[
+    public static void caseContainers()
+    {
+        container values = [1, 'a', 2.5];
+        MXTXppConformance::emit(conLen(values));
+        MXTXppConformance::emit(conPeek(values, 2));
+        values += 3;
+        MXTXppConformance::emit(conPeek(values, 4));
+        MXTXppConformance::emit(values == [1, 'a', 2.5, 3]);
+        container copy = values;
+        copy = conPoke(copy, 1, 99);
+        MXTXppConformance::emit(conPeek(values, 1));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseControlFlow</Name>
+				<Source><![CDATA[
+    public static void caseControlFlow()
+    {
+        int total;
+        int i;
+        for (i = 0; i < 10; i++)
+        {
+            if (i == 2) continue;
+            if (i == 7) break;
+            total += i;
+        }
+        MXTXppConformance::emit(total);
+
+        switch (total)
+        {
+            case 1:
+            case 19:
+                MXTXppConformance::emit('matched');
+                break;
+            default:
+                MXTXppConformance::emit('default');
+        }
+
+        i = 0;
+        while (i < 3) i++;
+        MXTXppConformance::emit(i);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseExceptionInsideTransaction</Name>
+				<Source><![CDATA[
+    public static void caseExceptionInsideTransaction()
+    {
+        // Runs at TTS level 1: X++ skips catch blocks inside a transaction
+        try
+        {
+            throw error('inside transaction');
+        }
+        catch (Exception::Error)
+        {
+            MXTXppConformance::emit('caught inside transaction');
+        }
+        MXTXppConformance::emit('after try');
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseTtsLevel</Name>
+				<Source><![CDATA[
+    public static void caseTtsLevel()
+    {
+        MXTXppConformance::emit(appl.ttsLevel());
+        ttsbegin;
+        MXTXppConformance::emit(appl.ttsLevel());
+        ttscommit;
+        MXTXppConformance::emit(appl.ttsLevel());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseStringFunctions</Name>
+				<Source><![CDATA[
+    public static void caseStringFunctions()
+    {
+        MXTXppConformance::emit(strFmt('%1 %2 %3', 1, 2.5, true));
+        MXTXppConformance::emit(int2Str(-5));
+        MXTXppConformance::emit(num2Str(1234.5678, 0, 2, 1, 0));
+        MXTXppConformance::emit(subStr('abcdef', 2, 3));
+        MXTXppConformance::emit(strUpr('abc'));
+        MXTXppConformance::emit(strScan('abcabc', 'ca', 1, 6));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caseAnytypeArithmetic</Name>
+				<Source><![CDATA[
+    public static void caseAnytypeArithmetic()
+    {
+        anytype left = 5;
+        anytype right = 2;
+        MXTXppConformance::emit(left + right);
+        MXTXppConformance::emit(left / right);
+        MXTXppConformance::emit(left > right);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

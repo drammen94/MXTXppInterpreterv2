@@ -170,6 +170,7 @@
     <Compile Include="Interpreter\Proxy\IXppExceptionsProxy.cs" />
     <Compile Include="Interpreter\Proxy\IXppReflectionProxy.cs" />
     <Compile Include="Interpreter\Proxy\IXppUnaryOperationProxy.cs" />
+    <Compile Include="Interpreter\ConformanceBuffer.cs" />
     <Compile Include="Interpreter\Proxy\MetadataCachingProxies.cs" />
     <Compile Include="Interpreter\Proxy\XppProxy.cs" />
     <Compile Include="Interpreter\Proxy\XppProxyHelper.cs" />

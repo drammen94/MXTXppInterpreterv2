@@ -14,5 +14,6 @@
 		<AxServiceOperation><Name>executeModule</Name><Method>executeModule</Method></AxServiceOperation>
 		<AxServiceOperation><Name>getModule</Name><Method>getModule</Method></AxServiceOperation>
 		<AxServiceOperation><Name>listModules</Name><Method>listModules</Method></AxServiceOperation>
+		<AxServiceOperation><Name>runConformance</Name><Method>runConformance</Method></AxServiceOperation>
 	</ServiceOperations>
 </AxService>

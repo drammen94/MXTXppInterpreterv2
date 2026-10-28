@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppConformance</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Differential conformance runner. Every static method of MXTXppConformanceCases whose
+/// name starts with "case" is executed twice: once as natively compiled X++ and once by
+/// reading the same method's source from metadata and running its body through the
+/// interpreter. Both runs report through emit(), and any difference is a place where
+/// interpreted execution does not behave like native code.
+/// </summary>
+public final class MXTXppConformance
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>emit</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Records a value together with its runtime type, so int/int64/real differences are visible.
+    /// </summary>
+    public static void emit(anytype _value)
+    {
+        XppInterpreter.Interpreter.ConformanceBuffer::Emit(strFmt('%1:%2', typeOf(_value), _value));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>runAll</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs every case natively and interpreted and returns a plain-text report.
+    /// </summary>
+    public static str runAll()
+    {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+
+        if (appl.ttsLevel() != 0)
+        {
+            throw error("Conformance runs require TTS level zero.");
+        }
+
+        DictClass dictClass = new DictClass(classNum(MXTXppConformanceCases));
+        var casesClass = Microsoft.Dynamics.Ax.Xpp.MetadataSupport::GetClass(classStr(MXTXppConformanceCases));
+        str report;
+        int passed;
+        int failed;
+        int i;
+
+        for (i = 1; i <= dictClass.staticMethodCnt(); i++)
+        {
+            str name = dictClass.staticMethod(i);
+
+            if (!strStartsWith(name, 'case'))
+            {
+                continue;
+            }
+
+            str native = MXTXppConformance::runNative(dictClass, name);
+            str body = MXTXppConformance::methodBody(casesClass.Methods.getObject(name).Source);
+            str interpreted = MXTXppConformance::runInterpreted(body);
+
+            if (native == interpreted)
+            {
+                passed++;
+                report += strFmt("PASS %1\n", name);
+            }
+            else
+            {
+                failed++;
+                report += strFmt("FAIL %1\n  native:      %2\n  interpreted: %3\n", name, native, interpreted);
+            }
+        }
+
+        return strFmt("%1 passed, %2 failed\n", passed, failed) + report;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>runNative</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs a case as compiled X++. The interpreter executes inside ttsbegin/ttsabort, so
+    /// native code runs in a transaction too; the try sits outside it exactly as in executeFast.
+    /// </summary>
+    private static str runNative(DictClass _dictClass, str _methodName)
+    {
+        XppInterpreter.Interpreter.ConformanceBuffer::Reset();
+
+        try
+        {
+            ttsbegin;
+            _dictClass.callStatic(_methodName);
+            ttsabort;
+        }
+        catch (Exception::CLRError)
+        {
+            XppInterpreter.Interpreter.ConformanceBuffer::Emit('!error');
+        }
+        catch
+        {
+            XppInterpreter.Interpreter.ConformanceBuffer::Emit('!error');
+        }
+
+        while (appl.ttsLevel() > 0)
+        {
+            ttsabort;
+        }
+
+        return XppInterpreter.Interpreter.ConformanceBuffer::Snapshot();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>runInterpreted</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs a case body through the same rollback-only path as the execute service operation.
+    /// </summary>
+    private static str runInterpreted(str _body)
+    {
+        XppInterpreter.Interpreter.ConformanceBuffer::Reset();
+
+        MXTXppInterpreterExecutionRequest request = new MXTXppInterpreterExecutionRequest();
+        request.parmSourceCode(_body);
+        MXTXppInterpreterExecutionResponse response = MXTXppInterpreterExecutor::executeFast(request);
+
+        if (!response.parmSuccess())
+        {
+            XppInterpreter.Interpreter.ConformanceBuffer::Emit('!error');
+        }
+
+        return XppInterpreter.Interpreter.ConformanceBuffer::Snapshot();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>methodBody</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Returns the statements between the outermost braces of a method's source.
+    /// </summary>
+    private static str methodBody(str _source)
+    {
+        int sourceLength = strLen(_source);
+        int bodyStart = strFind(_source, '{', 1, sourceLength);
+        int bodyEnd = strFind(_source, '}', sourceLength, -sourceLength);
+
+        if (!bodyStart || bodyEnd <= bodyStart)
+        {
+            throw error("Conformance case source has no method body.");
+        }
+
+        return subStr(_source, bodyStart + 1, bodyEnd - bodyStart - 1);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -29,6 +29,21 @@ public final class MXTXppInterpreterService
 ]]></Source>
 			</Method>
 			<Method>
+				<Name>runConformance</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs every MXTXppConformanceCases case natively and interpreted, and reports
+    /// each case whose observable results differ. All database work is rolled back.
+    /// </summary>
+    [SysEntryPointAttribute(true)]
+    public str runConformance()
+    {
+        return MXTXppConformance::runAll();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
 				<Name>deployModule</Name>
 				<Source><![CDATA[
     /// <summary>Creates an immutable staged module version and optionally activates it.</summary>

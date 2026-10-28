@@ -40,7 +40,48 @@ Measured against a Unified AOS environment on 2026-09-03:
 | 1,000-iteration interpreted loop | 200.2 ms | 49.7 ms |
 | Runtime table: 100 inserts plus query | 195.6 ms | 235.3 ms |
 
-The server column is a single returned sample; the HTTP percentiles are measured across repeated requests. The deployment helper for a Unified development environment is `Scripts\Deploy-MXTXppUdeModule.ps1`.
+The server column is a single returned sample; the HTTP percentiles are measured across repeated requests. The deployment helper for a Unified development environment is `Scripts\Deploy-MXTXppUdeModule.ps1`. These measurements predate the hot-path work below and have not been re-taken on an AOS yet.
+
+### Interactive session
+
+`Start-MXTXppSession.ps1` keeps one keep-alive connection and one cached token for the whole session, so each run is a single request instead of a new TLS handshake plus an Azure CLI token call:
+
+```powershell
+# Prompt: type X++, finish with an empty line, :q quits
+.\Scripts\Start-MXTXppSession.ps1
+
+# Rerun a file every time it is saved
+.\Scripts\Start-MXTXppSession.ps1 -Watch .\scratch.xpp
+```
+
+The same warm client is available as a module (`Import-Module .\Scripts\MXTXppClient.psm1`, then `Connect-MXTXpp` and `Invoke-MXTXpp`).
+
+### Native conformance
+
+`MXTXppConformanceCases` holds X++ cases that are compiled natively *and* interpreted from their own source text read from metadata, so both runs execute exactly the same code. Every value is reported through `MXTXppConformance::emit`, together with its runtime type, and any difference is reported:
+
+```powershell
+.\Scripts\Invoke-MXTXppConformance.ps1
+```
+
+Add a case for any behaviour the interpreter evaluates itself rather than delegating to the native runtime (operators, conversions, defaults, transactions, exceptions). The service operation is `runConformance`; it runs at the same TTS level as `execute` and rolls back all database work.
+
+### Hot-path performance
+
+The interpreter avoids host round trips wherever the result provably cannot differ from native X++:
+
+* Same-type `int`/`int64`/`boolean` comparisons, bitwise operators and non-overflowing `+ - *` are evaluated inline. Overflow, `real`, `str`, `div`, `mod`, shifts and mixed types still go through the native operator proxy.
+* Call sites cache how a receiver type dispatches (script class, compiled extension, CLR-only, `_Extension` class), and CLR calls cache overload selection per argument signature and compile direct invokers for hot methods.
+* Metadata-only proxy questions (type resolution, method/field existence and return types, enum and EDT facts) are memoized for the life of the AOS process by `MetadataCache`. Set `MetadataCache.Enabled` to `false` to opt out, or call `MetadataCache.Clear()`.
+
+In-process benchmark, test proxies, warm, P50:
+
+| Scenario | Before | After |
+| --- | ---: | ---: |
+| 1,000-iteration `int` loop | 7.11 ms | 0.43 ms |
+| 1,000 static CLR calls | 8.70 ms | 0.85 ms |
+| 1,000 instance CLR calls | 13.25 ms | 0.72 ms |
+| 1,000 CLR property reads | 9.81 ms | 0.82 ms |
 
 ### Durable interpreted modules
 
@@ -151,7 +192,7 @@ select firstOnly customer
 
 ## Verification
 
-The standalone .NET Framework 4.7.2 conformance suite currently contains 101 tests covering the parser, classes, compiled base/interface identity and callbacks, script/AOS-target CoC, attributed events and hooks, executable runtime artifacts and intrinsics, metadata signatures, macros, CLR, `byref`, arrays, native and runtime queries, transactions, and execution limits:
+The standalone .NET Framework 4.7.2 conformance suite currently contains 109 tests covering the parser, classes, compiled base/interface identity and callbacks, script/AOS-target CoC, attributed events and hooks, executable runtime artifacts and intrinsics, metadata signatures, macros, CLR, `byref`, arrays, native and runtime queries, transactions, and execution limits:
 
 ```powershell
 dotnet msbuild Projects\XppInterpreter.Tests\XppInterpreter.Tests.csproj /t:Rebuild /p:Configuration=Debug
