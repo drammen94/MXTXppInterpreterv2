@@ -1,0 +1,406 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppRuntimeFormBuilder</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Passed to the build(MXTXppRuntimeFormBuilder) method of an interpreted [RuntimeForm] class.
+/// Adds data sources and controls to a form that exists only at runtime, and wires control
+/// events to the interpreted class by name: a method ControlName_clicked, ControlName_modified,
+/// ControlName_validate or ControlName_lookup is called with the control when that event fires.
+/// form() and design() give the full native form build API for anything the helpers do not cover.
+/// </summary>
+public final class MXTXppRuntimeFormBuilder
+{
+    Form form;
+    FormBuildDesign design;
+    MXTXppRuntimeFormHost host;
+    Map dataSources;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>construct</Name>
+				<Source><![CDATA[
+    internal static MXTXppRuntimeFormBuilder construct(Form _form, MXTXppRuntimeFormHost _host)
+    {
+        MXTXppRuntimeFormBuilder builder = new MXTXppRuntimeFormBuilder();
+        builder.init(_form, _host);
+        return builder;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>init</Name>
+				<Source><![CDATA[
+    private void init(Form _form, MXTXppRuntimeFormHost _host)
+    {
+        form = _form;
+        host = _host;
+        design = form.addDesign('Design');
+        dataSources = new Map(Types::String, Types::Class);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>form</Name>
+				<Source><![CDATA[
+    public Form form()
+    {
+        return form;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>design</Name>
+				<Source><![CDATA[
+    public FormBuildDesign design()
+    {
+        return design;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>caption</Name>
+				<Source><![CDATA[
+    public void caption(str _caption)
+    {
+        design.caption(_caption);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parent</Name>
+				<Source><![CDATA[
+    private Object parent(Object _parent)
+    {
+        return _parent ? _parent : design;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>handles</Name>
+				<Source><![CDATA[
+    private boolean handles(str _controlName, str _event)
+    {
+        return host.handles(_controlName + '_' + _event);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addDataSource</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds a data source on an installed table or view. Grids and fields bound to it show and edit
+    /// its rows with the standard form data handling.
+    /// </summary>
+    public FormBuildDataSource addDataSource(str _name, str _tableName)
+    {
+        if (!tableName2Id(_tableName))
+        {
+            throw error(strFmt('Table %1 does not exist.', _tableName));
+        }
+
+        FormBuildDataSource dataSource = form.addDataSource(_name, _tableName);
+        dataSource.table(tableName2Id(_tableName));
+        dataSources.insert(_name, dataSource);
+        return dataSource;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dataSource</Name>
+				<Source><![CDATA[
+    public FormBuildDataSource dataSource(str _name)
+    {
+        if (!dataSources.exists(_name))
+        {
+            throw error(strFmt('Data source %1 has not been added.', _name));
+        }
+
+        return dataSources.lookup(_name);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addGroup</Name>
+				<Source><![CDATA[
+    public FormBuildGroupControl addGroup(str _name, str _caption = '', Object _parent = null)
+    {
+        Object parent = this.parent(_parent);
+        FormBuildGroupControl control = parent.addControl(FormControlType::Group, _name);
+        if (_caption)
+        {
+            control.caption(_caption);
+        }
+        return control;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addTab</Name>
+				<Source><![CDATA[
+    public FormBuildTabControl addTab(str _name, Object _parent = null)
+    {
+        Object parent = this.parent(_parent);
+        FormBuildTabControl control = parent.addControl(FormControlType::Tab, _name);
+        return control;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addTabPage</Name>
+				<Source><![CDATA[
+    public FormBuildTabPageControl addTabPage(FormBuildTabControl _tab, str _name, str _caption = '')
+    {
+        FormBuildTabPageControl control = _tab.addControl(FormControlType::TabPage, _name);
+        if (_caption)
+        {
+            control.caption(_caption);
+        }
+        return control;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addStatic</Name>
+				<Source><![CDATA[
+    public FormBuildStaticTextControl addStatic(str _name, str _text, Object _parent = null)
+    {
+        Object parent = this.parent(_parent);
+        FormBuildStaticTextControl control = parent.addControl(FormControlType::StaticText, _name);
+        control.text(_text);
+        return control;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addButton</Name>
+				<Source><![CDATA[
+    public FormBuildButtonControl addButton(str _name, str _text, Object _parent = null)
+    {
+        Object parent = this.parent(_parent);
+        FormBuildButtonControl control = parent.addControl(FormControlType::Button, _name);
+        control.text(_text);
+        if (this.handles(_name, 'clicked'))
+        {
+            control.registerOverrideMethod(methodStr(FormButtonControl, clicked), methodStr(MXTXppRuntimeFormHost, buttonClicked), host);
+        }
+        return control;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addString</Name>
+				<Source><![CDATA[
+    public FormBuildStringControl addString(str _name, str _label = '', Object _parent = null)
+    {
+        Object parent = this.parent(_parent);
+        FormBuildStringControl control = parent.addControl(FormControlType::String, _name);
+        control.label(_label ? _label : _name);
+        if (this.handles(_name, 'modified'))
+        {
+            control.registerOverrideMethod(methodStr(FormStringControl, modified), methodStr(MXTXppRuntimeFormHost, stringModified), host);
+        }
+        if (this.handles(_name, 'validate'))
+        {
+            control.registerOverrideMethod(methodStr(FormStringControl, validate), methodStr(MXTXppRuntimeFormHost, stringValidate), host);
+        }
+        if (this.handles(_name, 'lookup'))
+        {
+            control.registerOverrideMethod(methodStr(FormStringControl, lookup), methodStr(MXTXppRuntimeFormHost, stringLookup), host);
+        }
+        return control;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addInt</Name>
+				<Source><![CDATA[
+    public FormBuildIntControl addInt(str _name, str _label = '', Object _parent = null)
+    {
+        Object parent = this.parent(_parent);
+        FormBuildIntControl control = parent.addControl(FormControlType::Integer, _name);
+        control.label(_label ? _label : _name);
+        if (this.handles(_name, 'modified'))
+        {
+            control.registerOverrideMethod(methodStr(FormIntControl, modified), methodStr(MXTXppRuntimeFormHost, intModified), host);
+        }
+        return control;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addInt64</Name>
+				<Source><![CDATA[
+    public FormBuildInt64Control addInt64(str _name, str _label = '', Object _parent = null)
+    {
+        Object parent = this.parent(_parent);
+        FormBuildInt64Control control = parent.addControl(FormControlType::Int64, _name);
+        control.label(_label ? _label : _name);
+        if (this.handles(_name, 'modified'))
+        {
+            control.registerOverrideMethod(methodStr(FormInt64Control, modified), methodStr(MXTXppRuntimeFormHost, int64Modified), host);
+        }
+        return control;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addReal</Name>
+				<Source><![CDATA[
+    public FormBuildRealControl addReal(str _name, str _label = '', Object _parent = null)
+    {
+        Object parent = this.parent(_parent);
+        FormBuildRealControl control = parent.addControl(FormControlType::Real, _name);
+        control.label(_label ? _label : _name);
+        if (this.handles(_name, 'modified'))
+        {
+            control.registerOverrideMethod(methodStr(FormRealControl, modified), methodStr(MXTXppRuntimeFormHost, realModified), host);
+        }
+        return control;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addDate</Name>
+				<Source><![CDATA[
+    public FormBuildDateControl addDate(str _name, str _label = '', Object _parent = null)
+    {
+        Object parent = this.parent(_parent);
+        FormBuildDateControl control = parent.addControl(FormControlType::Date, _name);
+        control.label(_label ? _label : _name);
+        if (this.handles(_name, 'modified'))
+        {
+            control.registerOverrideMethod(methodStr(FormDateControl, modified), methodStr(MXTXppRuntimeFormHost, dateModified), host);
+        }
+        return control;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addCheckBox</Name>
+				<Source><![CDATA[
+    public FormBuildCheckBoxControl addCheckBox(str _name, str _label = '', Object _parent = null)
+    {
+        Object parent = this.parent(_parent);
+        FormBuildCheckBoxControl control = parent.addControl(FormControlType::CheckBox, _name);
+        control.label(_label ? _label : _name);
+        if (this.handles(_name, 'modified'))
+        {
+            control.registerOverrideMethod(methodStr(FormCheckBoxControl, modified), methodStr(MXTXppRuntimeFormHost, checkBoxModified), host);
+        }
+        return control;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addComboBox</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds a combo box over an installed base enum.
+    /// </summary>
+    public FormBuildComboBoxControl addComboBox(str _name, str _enumName, str _label = '', Object _parent = null)
+    {
+        if (!enumName2Id(_enumName))
+        {
+            throw error(strFmt('Base enum %1 does not exist.', _enumName));
+        }
+
+        Object parent = this.parent(_parent);
+        FormBuildComboBoxControl control = parent.addControl(FormControlType::ComboBox, _name);
+        control.enumType(enumName2Id(_enumName));
+        control.label(_label ? _label : _name);
+        if (this.handles(_name, 'modified'))
+        {
+            control.registerOverrideMethod(methodStr(FormComboBoxControl, modified), methodStr(MXTXppRuntimeFormHost, comboBoxModified), host);
+        }
+        return control;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addGrid</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds a grid over a data source added with addDataSource, with one column per field name.
+    /// </summary>
+    public FormBuildGridControl addGrid(str _name, str _dataSourceName, container _fieldNames = conNull(), Object _parent = null)
+    {
+        FormBuildDataSource dataSource = this.dataSource(_dataSourceName);
+        Object parent = this.parent(_parent);
+        FormBuildGridControl grid = parent.addControl(FormControlType::Grid, _name);
+        grid.dataSource(dataSource.id());
+
+        for (int position = 1; position <= conLen(_fieldNames); position++)
+        {
+            this.addGridField(grid, _dataSourceName, conPeek(_fieldNames, position));
+        }
+
+        return grid;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addGridField</Name>
+				<Source><![CDATA[
+    public void addGridField(FormBuildGridControl _grid, str _dataSourceName, str _fieldName)
+    {
+        FormBuildDataSource dataSource = this.dataSource(_dataSourceName);
+        FieldId fieldId = fieldName2Id(dataSource.table(), _fieldName);
+        if (!fieldId)
+        {
+            throw error(strFmt('Field %1 does not exist on data source %2.', _fieldName, _dataSourceName));
+        }
+
+        _grid.addDataField(dataSource.id(), fieldId);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>addField</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Adds a control bound to a field of a data source, typed and labelled from the field's metadata.
+    /// </summary>
+    public FormBuildControl addField(str _dataSourceName, str _fieldName, Object _parent = null)
+    {
+        FormBuildDataSource dataSource = this.dataSource(_dataSourceName);
+        FieldId fieldId = fieldName2Id(dataSource.table(), _fieldName);
+        if (!fieldId)
+        {
+            throw error(strFmt('Field %1 does not exist on data source %2.', _fieldName, _dataSourceName));
+        }
+
+        Object parent = this.parent(_parent);
+        return parent.addDataField(dataSource.id(), fieldId);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

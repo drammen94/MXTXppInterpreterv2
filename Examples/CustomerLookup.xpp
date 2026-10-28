@@ -1,0 +1,48 @@
+// A form written in interpreted X++. Deploy it as a module and open it from
+// Runtime forms; deploying a new version changes the form the next time it opens.
+//
+//   .\Scripts\Invoke-MXTXppModule.ps1 Deploy -ModuleName Demo.Forms -Path .\Examples\CustomerLookup.xpp
+
+[RuntimeMenuItem('Customer lookup')]
+class CustomerLookupForm
+{
+    FormRun formRun;
+
+    public str caption()
+    {
+        return 'Customer lookup';
+    }
+
+    public void build(MXTXppRuntimeFormBuilder _builder)
+    {
+        _builder.addDataSource('Customers', 'CustTable');
+
+        FormBuildGroupControl search = _builder.addGroup('Search', 'Search');
+        _builder.addString('Account', 'Customer account', search);
+        _builder.addButton('Find', 'Find', search);
+        _builder.addStatic('Result', '', search);
+
+        _builder.addGrid('Grid', 'Customers', ['AccountNum', 'CustGroup', 'Currency']);
+    }
+
+    public void init(FormRun _formRun)
+    {
+        formRun = _formRun;
+    }
+
+    public void Find_clicked(FormButtonControl _control)
+    {
+        FormStringControl account = formRun.design().controlName('Account');
+        FormStaticTextControl result = formRun.design().controlName('Result');
+        CustTable custTable = CustTable::find(account.text());
+
+        result.text(custTable.RecId ? strFmt('%1, group %2', custTable.AccountNum, custTable.CustGroup) : 'Not found');
+    }
+
+    public boolean Account_modified(FormStringControl _control)
+    {
+        FormStaticTextControl result = formRun.design().controlName('Result');
+        result.text('');
+        return true;
+    }
+}

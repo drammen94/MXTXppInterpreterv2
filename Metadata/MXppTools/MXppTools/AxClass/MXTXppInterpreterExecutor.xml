@@ -418,6 +418,40 @@ internal final class MXTXppInterpreterExecutor
 ]]></Source>
 			</Method>
 			<Method>
+				<Name>sharedProxy</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// The interpreter proxy of this AOS process, for hosts that run interpreted code themselves.
+    /// </summary>
+    internal static XppInterpreter.Interpreter.Proxy.XppProxy sharedProxy()
+    {
+        return proxy;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newInteractiveOptions</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Limits for one interactive event of a runtime form. Database work follows the normal form
+    /// transaction rules; nothing is rolled back by the host.
+    /// </summary>
+    internal static XppInterpreter.Interpreter.XppInterpreterOptions newInteractiveOptions()
+    {
+        XppInterpreter.Interpreter.XppInterpreterOptions options = new XppInterpreter.Interpreter.XppInterpreterOptions();
+
+        options.EmitGlobalTtsAbort = false;
+        options.MaxLoopIterations = 100000;
+        options.MaxInstructions = 1000000;
+        options.MaxExecutionMilliseconds = 30000;
+
+        return options;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
 				<Name>newFastExecutionOptions</Name>
 				<Source><![CDATA[
     /// <summary>

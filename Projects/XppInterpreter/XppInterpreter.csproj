@@ -68,6 +68,7 @@
     <Compile Include="Interpreter\ClrBridge.cs" />
     <Compile Include="Interpreter\Bytecode\LoopJit.cs" />
     <Compile Include="Interpreter\NotebookKernel.cs" />
+    <Compile Include="Interpreter\RuntimeFormHost.cs" />
     <Compile Include="Interpreter\Metadata\AosTypeDescriptor.cs" />
     <Compile Include="Interpreter\Metadata\DynamicModelRegistry.cs" />
     <Compile Include="Interpreter\Bytecode\Arithmetic.cs" />

@@ -13,6 +13,12 @@
 						<Name>MXTScriptWorkspaceTile</Name>
 						<Tile>MXTScriptWorkspaceTile</Tile>
 					</AxMenuElement>
+					<AxMenuElement xmlns=""
+						i:type="AxMenuElementMenuItem">
+						<Name>MXTXppRuntimeForms</Name>
+						<MenuItemName>MXTXppRuntimeForms</MenuItemName>
+						<MenuItemType>Action</MenuItemType>
+					</AxMenuElement>
 				</Elements>
 			</MenuElement>
 		</AxMenuExtensionElement>

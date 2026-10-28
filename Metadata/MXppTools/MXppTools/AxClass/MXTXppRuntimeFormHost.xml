@@ -1,0 +1,413 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppRuntimeFormHost</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Generic host for forms written in interpreted X++. A class in a durable module marked
+/// [RuntimeForm] or [RuntimeMenuItem('Label')] becomes a form the user can open from the
+/// MXTXppRuntimeForms menu item: the form is built at runtime from the class's
+/// build(MXTXppRuntimeFormBuilder) method and its control events call the class's
+/// ControlName_event methods. Deploying a new module version changes the form the next time it
+/// is opened; nothing is compiled or deployed to the AOT.
+///
+/// Controller methods, all optional:
+///     str caption()
+///     void build(MXTXppRuntimeFormBuilder _builder)
+///     void init(FormRun _formRun)          after the form is initialized, before it shows
+///     void ControlName_clicked(FormButtonControl _control)
+///     boolean ControlName_modified(FormControl _control)
+///     boolean ControlName_validate(FormStringControl _control)
+///     void ControlName_lookup(FormStringControl _control)
+/// </summary>
+public final class MXTXppRuntimeFormHost
+{
+    XppInterpreter.Interpreter.RuntimeFormInstance controller;
+    FormRun formRun;
+
+    // Launcher only: button name to [module, class]
+    Map launcherTargets;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Entry point of the MXTXppRuntimeForms menu item. A menu item parameter "Module/Class" opens
+    /// that form directly; otherwise the launcher lists every runtime form of the active modules.
+    /// </summary>
+    public static void main(Args _args)
+    {
+        str target = _args ? _args.parm() : '';
+        int separator = strScan(target, '/', 1, strLen(target));
+
+        if (separator > 1)
+        {
+            MXTXppRuntimeFormHost::open(subStr(target, 1, separator - 1), subStr(target, separator + 1, strLen(target)));
+        }
+        else
+        {
+            MXTXppRuntimeFormHost::openLauncher();
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>open</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Opens the interpreted form class of the active version of a module.
+    /// </summary>
+    public static FormRun open(str _moduleName, str _className, Object _caller = null)
+    {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+
+        XppInterpreter.Interpreter.Bytecode.ByteCode byteCode = MXTXppInterpreterModuleRegistry::activeByteCode(_moduleName);
+        MXTXppRuntimeFormHost host = new MXTXppRuntimeFormHost();
+
+        try
+        {
+            host.parmController(XppInterpreter.Interpreter.RuntimeFormInstance::Create(
+                byteCode,
+                MXTXppInterpreterExecutor::sharedProxy(),
+                MXTXppInterpreterExecutor::newInteractiveOptions(),
+                _className));
+
+            Form form = new Form();
+            form.name(_className);
+            MXTXppRuntimeFormBuilder builder = MXTXppRuntimeFormBuilder::construct(form, host);
+            builder.caption(host.handles('caption') ? any2Str(host.parmController().Call('caption')) : _className);
+
+            if (host.handles('build'))
+            {
+                host.parmController().Call1('build', builder);
+            }
+
+            return host.run(form, _caller);
+        }
+        catch (Exception::CLRError)
+        {
+            throw error(MXTXppRuntimeFormHost::clrErrorText(strFmt('Runtime form %1/%2 could not be opened.', _moduleName, _className)));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>run</Name>
+				<Source><![CDATA[
+    private FormRun run(Form _form, Object _caller)
+    {
+        Args args = new Args();
+        args.object(_form);
+        if (_caller)
+        {
+            args.caller(_caller);
+        }
+
+        formRun = classFactory.formRunClass(args);
+        formRun.init();
+
+        if (this.handles('init'))
+        {
+            controller.Call1('init', formRun);
+        }
+
+        formRun.run();
+        formRun.detach();
+        return formRun;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>openLauncher</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// A runtime form with one button per runtime form of every active module: the menu for forms
+    /// that have no AOT menu item.
+    /// </summary>
+    public static FormRun openLauncher()
+    {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+
+        MXTXppRuntimeFormHost host = new MXTXppRuntimeFormHost();
+        host.parmLauncherTargets(new Map(Types::String, Types::Container));
+
+        Form form = new Form();
+        form.name('MXTXppRuntimeForms');
+        MXTXppRuntimeFormBuilder builder = MXTXppRuntimeFormBuilder::construct(form, host);
+        builder.caption('Runtime forms');
+
+        container modules = MXTXppInterpreterModuleRegistry::activeModuleNames();
+        int buttonCount;
+
+        for (int modulePosition = 1; modulePosition <= conLen(modules); modulePosition++)
+        {
+            str moduleName = conPeek(modules, modulePosition);
+            str catalog;
+
+            try
+            {
+                catalog = XppInterpreter.Interpreter.RuntimeFormCatalog::Describe(
+                    MXTXppInterpreterModuleRegistry::activeByteCode(moduleName));
+            }
+            catch (Exception::CLRError)
+            {
+                // A module that no longer compiles must not hide the forms of the others
+                warning(MXTXppRuntimeFormHost::clrErrorText(strFmt('Module %1 could not be compiled.', moduleName)));
+                catalog = '';
+            }
+            catch
+            {
+                catalog = '';
+            }
+
+            if (!catalog)
+            {
+                continue;
+            }
+
+            FormBuildGroupControl group = builder.addGroup(strFmt('Module%1', modulePosition), moduleName);
+            List lines = strSplit(catalog, '\n');
+            ListEnumerator enumerator = lines.getEnumerator();
+
+            while (enumerator.moveNext())
+            {
+                str line = enumerator.current();
+                int tab = strScan(line, '\t', 1, strLen(line));
+                if (tab <= 1)
+                {
+                    continue;
+                }
+
+                buttonCount++;
+                str buttonName = strFmt('Open%1', buttonCount);
+                host.parmLauncherTargets().insert(buttonName, [moduleName, subStr(line, 1, tab - 1)]);
+
+                FormBuildButtonControl button = group.addControl(FormControlType::Button, buttonName);
+                button.text(subStr(line, tab + 1, strLen(line)));
+                button.registerOverrideMethod(methodStr(FormButtonControl, clicked), methodStr(MXTXppRuntimeFormHost, launcherClicked), host);
+            }
+        }
+
+        if (!buttonCount)
+        {
+            builder.addStatic('Empty', 'No active module declares a [RuntimeForm] or [RuntimeMenuItem] class. Deploy one with Invoke-MXTXppModule.ps1.');
+        }
+
+        return host.run(form, null);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmController</Name>
+				<Source><![CDATA[
+    internal XppInterpreter.Interpreter.RuntimeFormInstance parmController(XppInterpreter.Interpreter.RuntimeFormInstance _controller = controller)
+    {
+        controller = _controller;
+        return controller;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmLauncherTargets</Name>
+				<Source><![CDATA[
+    internal Map parmLauncherTargets(Map _launcherTargets = launcherTargets)
+    {
+        launcherTargets = _launcherTargets;
+        return launcherTargets;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>handles</Name>
+				<Source><![CDATA[
+    /// <summary>True when the interpreted controller declares a method of this name.</summary>
+    internal boolean handles(str _methodName)
+    {
+        return controller != null && controller.Has(_methodName);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>clrErrorText</Name>
+				<Source><![CDATA[
+    private static str clrErrorText(str _fallback)
+    {
+        System.Exception exception = CLRInterop::getLastException();
+
+        // Reflection wraps the script's own exception; its message is the useful one
+        while (exception && exception.InnerException)
+        {
+            exception = exception.InnerException;
+        }
+
+        return exception ? exception.Message : _fallback;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>call</Name>
+				<Source><![CDATA[
+    private void call(str _methodName, Object _control)
+    {
+        try
+        {
+            controller.Call1(_methodName, _control);
+        }
+        catch (Exception::CLRError)
+        {
+            error(MXTXppRuntimeFormHost::clrErrorText(strFmt('%1 failed.', _methodName)));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>decide</Name>
+				<Source><![CDATA[
+    private boolean decide(str _methodName, Object _control, boolean _nativeResult)
+    {
+        try
+        {
+            return controller.CallPredicate(_methodName, _control, _nativeResult);
+        }
+        catch (Exception::CLRError)
+        {
+            return checkFailed(MXTXppRuntimeFormHost::clrErrorText(strFmt('%1 failed.', _methodName)));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>launcherClicked</Name>
+				<Source><![CDATA[
+    public void launcherClicked(FormButtonControl _control)
+    {
+        container target = launcherTargets.lookup(_control.name());
+        MXTXppRuntimeFormHost::open(conPeek(target, 1), conPeek(target, 2), formRun);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>buttonClicked</Name>
+				<Source><![CDATA[
+    public void buttonClicked(FormButtonControl _control)
+    {
+        _control.clicked();
+        this.call(_control.name() + '_clicked', _control);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>stringModified</Name>
+				<Source><![CDATA[
+    public boolean stringModified(FormStringControl _control)
+    {
+        boolean ret = _control.modified();
+        return this.decide(_control.name() + '_modified', _control, ret);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>stringValidate</Name>
+				<Source><![CDATA[
+    public boolean stringValidate(FormStringControl _control)
+    {
+        boolean ret = _control.validate();
+        return ret && this.decide(_control.name() + '_validate', _control, ret);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>stringLookup</Name>
+				<Source><![CDATA[
+    public void stringLookup(FormStringControl _control)
+    {
+        this.call(_control.name() + '_lookup', _control);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>intModified</Name>
+				<Source><![CDATA[
+    public boolean intModified(FormIntControl _control)
+    {
+        boolean ret = _control.modified();
+        return this.decide(_control.name() + '_modified', _control, ret);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>int64Modified</Name>
+				<Source><![CDATA[
+    public boolean int64Modified(FormInt64Control _control)
+    {
+        boolean ret = _control.modified();
+        return this.decide(_control.name() + '_modified', _control, ret);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>realModified</Name>
+				<Source><![CDATA[
+    public boolean realModified(FormRealControl _control)
+    {
+        boolean ret = _control.modified();
+        return this.decide(_control.name() + '_modified', _control, ret);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dateModified</Name>
+				<Source><![CDATA[
+    public boolean dateModified(FormDateControl _control)
+    {
+        boolean ret = _control.modified();
+        return this.decide(_control.name() + '_modified', _control, ret);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>checkBoxModified</Name>
+				<Source><![CDATA[
+    public boolean checkBoxModified(FormCheckBoxControl _control)
+    {
+        boolean ret = _control.modified();
+        return this.decide(_control.name() + '_modified', _control, ret);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>comboBoxModified</Name>
+				<Source><![CDATA[
+    public boolean comboBoxModified(FormComboBoxControl _control)
+    {
+        boolean ret = _control.modified();
+        return this.decide(_control.name() + '_modified', _control, ret);
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

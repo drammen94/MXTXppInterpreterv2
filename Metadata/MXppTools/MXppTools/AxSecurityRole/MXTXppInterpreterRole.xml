@@ -12,6 +12,9 @@
 		<AxSecurityPrivilegeReference>
 			<Name>MXTXppInterpreterScriptExecutionLogMaintain</Name>
 		</AxSecurityPrivilegeReference>
+		<AxSecurityPrivilegeReference>
+			<Name>MXTXppRuntimeForms</Name>
+		</AxSecurityPrivilegeReference>
 	</Privileges>
 	<SubRoles />
 </AxSecurityRole>

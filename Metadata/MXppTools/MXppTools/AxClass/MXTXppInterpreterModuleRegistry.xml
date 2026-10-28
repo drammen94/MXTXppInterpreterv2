@@ -740,6 +740,66 @@ internal final class MXTXppInterpreterModuleRegistry
 ]]></Source>
 			</Method>
 			<Method>
+				<Name>activeByteCode</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Bytecode of the active version of a module, from the AOS cache when it is already compiled.
+    /// </summary>
+    internal static XppInterpreter.Interpreter.Bytecode.ByteCode activeByteCode(str _moduleName)
+    {
+        str moduleName = MXTXppInterpreterModuleRegistry::normalizeName(_moduleName);
+        container module = MXTXppInterpreterModuleRegistry::readModule(moduleName);
+        if (!module)
+        {
+            throw error(strFmt('Module %1 does not exist.', moduleName));
+        }
+
+        int version = conPeek(module, 3);
+        if (!version)
+        {
+            throw error(strFmt('Module %1 has no active version.', moduleName));
+        }
+
+        container versionRecord = MXTXppInterpreterModuleRegistry::findVersion(module, version);
+        if (!versionRecord)
+        {
+            throw error(strFmt('Module %1 version %2 does not exist.', moduleName, version));
+        }
+
+        return MXTXppInterpreterModuleRegistry::getCompiled(moduleName, versionRecord).parmByteCode();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>activeModuleNames</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Names of the modules that have an active version.
+    /// </summary>
+    internal static container activeModuleNames()
+    {
+        container catalog = MXTXppInterpreterModuleRegistry::unpackStorage(
+            MXTXppInterpreterModuleRegistry::findStorage(CatalogKey));
+        container names = catalog ? conPeek(catalog, 2) : conNull();
+        container active;
+
+        for (int namePosition = 1; namePosition <= conLen(names); namePosition++)
+        {
+            str moduleName = conPeek(names, namePosition);
+            container module = MXTXppInterpreterModuleRegistry::readModule(moduleName);
+            if (module && conPeek(module, 3))
+            {
+                active += moduleName;
+            }
+        }
+
+        return active;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
 				<Name>execute</Name>
 				<Source><![CDATA[
     public static MXTXppInterpreterExecutionResponse execute(MXTXppInterpreterModuleRequest _request)

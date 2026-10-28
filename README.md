@@ -133,6 +133,39 @@ Dependencies are pinned when a version is staged. `-Dependency Common.Library` p
 
 The durable module endpoints are `deployModule`, `activateModule`, `rollbackModule`, `executeModule`, `getModule`, and `listModules` under the same authenticated service URL. Module management commits only registry metadata; interpreted business code is still executed inside the bounded 30-second rollback scope.
 
+### Runtime forms and menu items
+
+Forms can be written in interpreted X++ too. A class in a module marked `[RuntimeForm]` or `[RuntimeMenuItem('Label')]` shows up under **Runtime forms**, an action menu item in the MXT navigation menu. The form is built at runtime from the class each time it opens, so deploying a new module version changes the form the next time it opens, with no build, AOT object or deployment. The host (`MXTXppRuntimeFormHost`, `MXTXppRuntimeFormBuilder`) ships once with MXppTools.
+
+```xpp
+[RuntimeMenuItem('Customer lookup')]
+class CustomerLookupForm
+{
+    public void build(MXTXppRuntimeFormBuilder _builder)
+    {
+        _builder.addDataSource('Customers', 'CustTable');
+        _builder.addString('Account', 'Customer account');
+        _builder.addButton('Find', 'Find');
+        _builder.addGrid('Grid', 'Customers', ['AccountNum', 'CustGroup']);
+    }
+
+    public void Find_clicked(FormButtonControl _control) { info('clicked'); }
+}
+```
+
+```powershell
+.\Scripts\Invoke-MXTXppModule.ps1 Deploy -ModuleName Demo.Forms -Path .\Examples\CustomerLookup.xpp
+```
+
+The controller's methods are all optional:
+
+* `str caption()`: the form caption.
+* `void build(MXTXppRuntimeFormBuilder _builder)`: lays out the form. The builder provides `addDataSource`, `addGroup`, `addTab`/`addTabPage`, `addString`, `addInt`, `addInt64`, `addReal`, `addDate`, `addCheckBox`, `addComboBox` (base enum), `addButton`, `addStatic`, `addGrid`/`addGridField` and `addField` (bound to a data source field). `form()` and `design()` return the native `Form`/`FormBuildDesign` for anything else.
+* `void init(FormRun _formRun)`: runs after the form is initialized and before it is shown.
+* `ControlName_clicked`, `ControlName_modified`, `ControlName_validate` and `ControlName_lookup` are called with the control when the event fires. `modified` and `validate` can return a boolean to override the native result. Events are wired by name only for controls added through the builder.
+
+Every event runs with fresh execution limits (1,000,000 instructions and 30 seconds per event), and database work follows the normal form rules: nothing is rolled back by the host. Opening the action menu item with the parameter `Module/Class` opens one form directly, and `MXTXppRuntimeFormHost::open('Module', 'Class')` opens one from code. A new AOT menu item can still point at a runtime form this way, but that menu item itself needs a build.
+
 ## Interpreter
 
 The parser generates bytecode for a hybrid runtime. Existing application classes, AOT metadata, `Common` buffers, SysDa queries, transactions, and CLR types execute through X++ host proxies. Script-declared code and runtime artifacts execute in the interpreter. The query router selects the native or interpreted relational engine from the actual buffer, so both kinds can coexist in one script.
@@ -206,7 +239,7 @@ select firstOnly customer
 
 * Existing AOT tables, data entities, forms, reports, services, and application classes remain usable from interpreted code. Table buffers are real AOS `Common` objects, field access is metadata-driven, set-based statements are lowered to SysDa, and methods are dispatched through the AOS reflection runtime. No native compilation of the script is required.
 * New runtime tables, entities, views, form controllers, reports, services, and maps do not need AOT installation: their schemas, identities, behavior, CRUD, queries, and intrinsics live in the active interpreter model. Runtime-table rows are scoped to that execution context; artifact methods can use existing AOS tables/services when durable cross-run storage is required.
-* Runtime artifacts are discoverable through `RuntimeContext.Models`. The generic resident custom service executes their code without native compilation; separate artifact-specific menu items, OData endpoints, or SSRS registrations still require native platform registration points.
+* Runtime artifacts are discoverable through `RuntimeContext.Models`. The generic resident custom service executes their code without native compilation. Forms open through the generic Runtime forms host; separate artifact-specific AOT menu items, OData endpoints, or SSRS registrations still require native platform registration points.
 * Interpreted Chain of Command can wrap compiled application classes/tables when the call enters through interpreted code. It does not patch a compiled method body or intercept a call that begins and remains entirely inside already-compiled X++.
 * Extending a compiled base that is **sealed or has no reachable constructor** falls back to wrapping (script overrides then remain invisible to compiled-side virtual calls); non-virtual/final base methods cannot be overridden, matching CLR/X++ dispatch rules. A compiled-interface proxy cannot use this fallback because it must preserve real interface identity, so an un-emittable interface implementation fails explicitly.
 * Framework attributes without an interpreter execution adapter remain available as runtime metadata. Attributes whose native meaning is to generate or modify deployable AOT artifacts still require the normal model build/deployment pipeline.
