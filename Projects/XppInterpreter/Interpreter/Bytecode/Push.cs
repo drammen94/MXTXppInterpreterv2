@@ -2,7 +2,7 @@
 {
     class Push : IInstruction
     {
-        object Value { get; }
+        internal object Value { get; }
         public string OperationCode
         {
             get

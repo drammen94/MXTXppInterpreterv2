@@ -21,6 +21,10 @@ namespace XppInterpreter.Tests
 
         private static int Main()
         {
+            // Every loop that qualifies is compiled after two iterations, so the whole suite also runs through the loop JIT
+            LoopJit.CompileSynchronously = true;
+            LoopJit.Threshold = 2;
+
             Run("div uses integer division", TestIntegerDivision);
             Run("final method cannot be overridden", () => ExpectParseError(@"
                 class Base { final int value() { return 1; } }
@@ -303,6 +307,17 @@ namespace XppInterpreter.Tests
             Run("hot CLR calls fall back for null value-type arguments", TestHotClrNullArgument);
             Run("polymorphic CLR call site dispatches per receiver type", TestPolymorphicCallSite);
             Run("single-statement bodies work without braces", TestBracelessBodies);
+            Run("compiled loops match the interpreter", TestCompiledLoopsMatchInterpreter);
+            Run("compiled loops leave int overflow to the native runtime", () => ExpectRuntimeError(@"
+                int value = 2147483000;
+                int i;
+                for (i = 0; i < 1000; i++) { value += 1; }
+            ", null, "OverflowException"));
+            Run("compiled loops still enforce the instruction limit", () => ExpectRuntimeError(@"
+                int i = 0;
+                while (true) { i += 1; }
+            ", new XppInterpreterOptions { MaxInstructions = 100000 }, "instruction limit"));
+            Run("compiled loops write variables back before an exception is caught", TestCompiledLoopWriteBack);
 
             if (Failures.Count == 0)
             {
@@ -1185,6 +1200,70 @@ namespace XppInterpreter.Tests
                 capture(score);
             ");
             Equal(2047, Convert.ToInt32(TestProxyFactory.LastCaptured), "integer fast path");
+        }
+
+        private static void TestCompiledLoopsMatchInterpreter()
+        {
+            string[] sources =
+            {
+                // Typed int and int64 variables, nested loops and short-circuit conditions
+                @"int total = 0; int i; int j;
+                  for (i = 0; i < 200; i++) { for (j = 0; j < 5; j++) { if (i > 10 && j < 3 || i == 150) total += i * j; } }
+                  capture(total);",
+                @"int64 big = 3000000000; int i = 0;
+                  while (i < 300) { big = big + big - big + 3; if (big > 3000000500) { big = big - 600; } i++; }
+                  captureAny(big);",
+                // Mixed widths, mod and booleans go through the same code the interpreter runs
+                @"int64 total = 0; int i = 0;
+                  while (i < 300) { if (i mod 3 == 0) { total += i * 2; } else { total -= 1; } i++; }
+                  captureAny(total);",
+                @"boolean flip = false; int i;
+                  for (i = 0; i < 301; i++) { flip = flip == false; }
+                  captureAny(flip);",
+                // Strings and reals are never unboxed
+                @"str text = ''; int i;
+                  for (i = 0; i < 40; i++) { text = text + 'a'; }
+                  captureAny(text);",
+                @"real amount = 0.5; int i;
+                  for (i = 0; i < 40; i++) { amount = amount * 2; }
+                  captureAny(amount);",
+                // break and continue are interpreted and must still agree
+                @"int total = 0; int i;
+                  for (i = 0; i < 100; i++) { if (i == 3) continue; if (i == 90) break; total += i; }
+                  capture(total);"
+            };
+
+            foreach (string source in sources)
+            {
+                LoopJit.Enabled = false;
+                Execute(source);
+                object interpreted = TestProxyFactory.LastCaptured;
+
+                LoopJit.Enabled = true;
+                Execute(source);
+                Execute(source);
+                object compiled = TestProxyFactory.LastCaptured;
+
+                Equal(Convert.ToString(interpreted), Convert.ToString(compiled), "compiled loop result");
+                Equal(interpreted?.GetType(), compiled?.GetType(), "compiled loop result type");
+            }
+        }
+
+        private static void TestCompiledLoopWriteBack()
+        {
+            Execute(@"
+                int value = 2147483000;
+                int i;
+                try
+                {
+                    for (i = 0; i < 1000; i++) { value += 1; }
+                }
+                catch
+                {
+                    capture(value);
+                }
+            ");
+            Equal(2147483647, Convert.ToInt32(TestProxyFactory.LastCaptured), "value at overflow");
         }
 
         private static void TestBracelessBodies()

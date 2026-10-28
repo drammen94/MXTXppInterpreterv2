@@ -137,19 +137,27 @@ namespace XppInterpreter.Interpreter.Bytecode
                     }
                     else
                     {
-                        var currentValue = context.ScopeHandler.CurrentScope.GetVar(Name);
-                        var type = currentValue?.GetType();
-
-                        if (value is null && context.Proxy.Reflection.IsCommonType(type))
-                        {
-                            context.Proxy.Reflection.ClearCommon(currentValue);
-                        }
-                        else
-                        {
-                            context.ScopeHandler.CurrentScope.SetVar(Name, value, context.Proxy.Casting);
-                        }
+                        AssignExisting(context, value);
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// Assigns an already declared, non-array variable; shared with the loop JIT
+        /// </summary>
+        internal void AssignExisting(RuntimeContext context, object value)
+        {
+            var currentValue = context.ScopeHandler.CurrentScope.GetVar(Name);
+            var type = currentValue?.GetType();
+
+            if (value is null && context.Proxy.Reflection.IsCommonType(type))
+            {
+                context.Proxy.Reflection.ClearCommon(currentValue);
+            }
+            else
+            {
+                context.ScopeHandler.CurrentScope.SetVar(Name, value, context.Proxy.Casting);
             }
         }
     }

@@ -34,7 +34,15 @@ namespace XppInterpreter.Interpreter
 
         public void Checkpoint()
         {
-            _instructionCount++;
+            Checkpoint(1);
+        }
+
+        /// <summary>
+        /// Counts a batch of instructions at once; used by compiled loops at each back edge
+        /// </summary>
+        public void Checkpoint(int instructions)
+        {
+            _instructionCount += instructions;
 
             if (_maxInstructions > 0 && _instructionCount > _maxInstructions)
             {

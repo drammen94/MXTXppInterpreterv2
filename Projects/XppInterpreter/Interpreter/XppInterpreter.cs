@@ -90,6 +90,8 @@ namespace XppInterpreter.Interpreter
             try
             {
                 bool isFirst = true;
+                Bytecode.LoopRegion[] loops = Bytecode.LoopJit.GetRegions(byteCode);
+                int loopResume = -1;
 
                 while (c.Counter < byteCode.Instructions.Count)
                 {
@@ -123,6 +125,19 @@ namespace XppInterpreter.Interpreter
                     isFirst = false;
 
                     int pc = c.Counter;
+
+                    // A compiled loop runs to its exit; where it handed back, the interpreter executes at least one instruction
+                    if (loops != null && pc != loopResume && loops[pc] != null)
+                    {
+                        if (loops[pc].TryRun(c, out int resume))
+                        {
+                            loopResume = resume;
+                            c.SetCounter(resume);
+                            continue;
+                        }
+                    }
+
+                    loopResume = -1;
 
                     try
                     { 

@@ -51,6 +51,11 @@ namespace XppInterpreter.Core
             throw new Exception($"Variable {varName} was not declared.");
         }
 
+        internal bool TryGetEntry(string varName, out VariableEntry entry)
+        {
+            return FindScopeContaining(varName, out entry) != null;
+        }
+
         private Scope FindScopeContaining(string varName, out VariableEntry entry)
         {
             // Walk the parent chain iteratively; only branch into secondary parents when they exist

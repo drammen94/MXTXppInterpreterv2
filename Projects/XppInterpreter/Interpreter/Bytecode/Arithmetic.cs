@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using XppInterpreter.Lexer;
 
@@ -26,10 +26,14 @@ namespace XppInterpreter.Interpreter.Bytecode
             object right = context.Stack.Pop();
             object left = context.Stack.Pop();
 
+            context.Stack.Push(Evaluate(context, left, right));
+        }
+
+        internal object Evaluate(RuntimeContext context, object left, object right)
+        {
             if (TryFastPath(left, right, out object result))
             {
-                context.Stack.Push(result);
-                return;
+                return result;
             }
 
             switch (TokenType)
@@ -111,15 +115,21 @@ namespace XppInterpreter.Interpreter.Bytecode
                     break;
             }
 
-            context.Stack.Push(result);
+            return result;
         }
+
+        private static readonly object True = true;
+        private static readonly object False = false;
+
+        private static object Box(bool value) => value ? True : False;
 
         /// <summary>
         /// Evaluates operations whose result cannot differ from native X++ without a proxy round trip.
-        /// Only same-type int/int64/bool operands qualify; anything that could overflow, round, or
-        /// depend on runtime conversion rules (real, str, mixed types, div, mod, shifts) goes to the proxy.
+        /// Only same-type int/int64/bool operands qualify, plus comparisons between int and int64 (exact
+        /// in either width); anything that could overflow, round, or depend on runtime conversion rules
+        /// (real, str, other mixed types, div, mod, shifts) goes to the proxy.
         /// </summary>
-        private bool TryFastPath(object left, object right, out object result)
+        internal bool TryFastPath(object left, object right, out object result)
         {
             if (left is int l32 && right is int r32)
             {
@@ -135,9 +145,14 @@ namespace XppInterpreter.Interpreter.Bytecode
             {
                 switch (TokenType)
                 {
-                    case TType.Equal: result = lb == rb; return true;
-                    case TType.NotEqual: result = lb != rb; return true;
+                    case TType.Equal: result = Box(lb == rb); return true;
+                    case TType.NotEqual: result = Box(lb != rb); return true;
                 }
+            }
+
+            if ((left is int || left is long) && (right is int || right is long) && TryCompare(Convert.ToInt64(left), Convert.ToInt64(right), out result))
+            {
+                return true;
             }
 
             result = null;
@@ -150,12 +165,13 @@ namespace XppInterpreter.Interpreter.Bytecode
 
             switch (TokenType)
             {
-                case TType.Equal: result = l == r; return true;
-                case TType.NotEqual: result = l != r; return true;
-                case TType.Greater: result = l > r; return true;
-                case TType.GreaterOrEqual: result = l >= r; return true;
-                case TType.Smaller: result = l < r; return true;
-                case TType.SmallerOrEqual: result = l <= r; return true;
+                case TType.Equal:
+                case TType.NotEqual:
+                case TType.Greater:
+                case TType.GreaterOrEqual:
+                case TType.Smaller:
+                case TType.SmallerOrEqual:
+                    return TryCompare(l, r, out result);
 
                 case TType.BinaryAnd: value = l & r; break;
                 case TType.BinaryOr: value = l | r; break;
@@ -190,6 +206,22 @@ namespace XppInterpreter.Interpreter.Bytecode
 
             result = narrow ? (object)(int)value : value;
             return true;
+        }
+
+        private bool TryCompare(long l, long r, out object result)
+        {
+            switch (TokenType)
+            {
+                case TType.Equal: result = Box(l == r); return true;
+                case TType.NotEqual: result = Box(l != r); return true;
+                case TType.Greater: result = Box(l > r); return true;
+                case TType.GreaterOrEqual: result = Box(l >= r); return true;
+                case TType.Smaller: result = Box(l < r); return true;
+                case TType.SmallerOrEqual: result = Box(l <= r); return true;
+            }
+
+            result = null;
+            return false;
         }
 
         private static bool FitsInt64Product(long l, long r)

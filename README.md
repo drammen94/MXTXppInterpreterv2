@@ -70,9 +70,10 @@ Add a case for any behaviour the interpreter evaluates itself rather than delega
 
 The interpreter avoids host round trips wherever the result provably cannot differ from native X++:
 
-* Same-type `int`/`int64`/`boolean` comparisons, bitwise operators and non-overflowing `+ - *` are evaluated inline. Overflow, `real`, `str`, `div`, `mod`, shifts and mixed types still go through the native operator proxy.
+* Same-type `int`/`int64`/`boolean` comparisons, `int`-to-`int64` comparisons, bitwise operators and non-overflowing `+ - *` are evaluated inline. Overflow, `real`, `str`, `div`, `mod`, shifts and mixed-width arithmetic still go through the native operator proxy.
 * Call sites cache how a receiver type dispatches (script class, compiled extension, CLR-only, `_Extension` class), and CLR calls cache overload selection per argument signature and compile direct invokers for hot methods.
 * Metadata-only proxy questions (type resolution, method/field existence and return types, enum and EDT facts) are memoized for the life of the AOS process by `MetadataCache`. Set `MetadataCache.Enabled` to `false` to opt out, or call `MetadataCache.Clear()`.
+* Hot loops are compiled to IL in memory (`LoopJit`), with no build step. A loop qualifies when it contains only constants, plain variable loads and assignments, arithmetic, conditions and jumps (no calls, queries, array access, declarations, `break`/`continue` or debugger statements). `int`, `int64` and `boolean` variables are kept unboxed while the loop runs and written back to the script's variables whenever control leaves compiled code. Whenever a value is not provably handled exactly as the interpreter would (overflow, a failed conversion, an exception), compiled code hands back to the interpreter at that instruction with the stack and scopes rebuilt. Instruction and time limits are still counted on every iteration. A loop is compiled on the thread pool after 64 iterations (`LoopJit.Threshold`) and the compiled code lives with the bytecode, so resident modules keep it across runs. Set `LoopJit.Enabled` to `false` to opt out.
 
 In-process benchmark, test proxies, warm, P50:
 
@@ -82,6 +83,14 @@ In-process benchmark, test proxies, warm, P50:
 | 1,000 static CLR calls | 8.70 ms | 0.85 ms |
 | 1,000 instance CLR calls | 13.25 ms | 0.72 ms |
 | 1,000 CLR property reads | 9.81 ms | 0.82 ms |
+
+Loop compilation, same harness, interpreted vs compiled:
+
+| Loop | Interpreted | Compiled |
+| --- | ---: | ---: |
+| 1,000-iteration `int` sum (benchmark P50) | 0.70 ms | 0.016 ms |
+| 1,000 iterations with `if`, `&&`, `\|\|` | 1.12 ms | 0.015 ms |
+| 100,000-iteration `int` loop | 85 ms | 0.89 ms |
 
 ### Durable interpreted modules
 
@@ -192,7 +201,7 @@ select firstOnly customer
 
 ## Verification
 
-The standalone .NET Framework 4.7.2 conformance suite currently contains 109 tests covering the parser, classes, compiled base/interface identity and callbacks, script/AOS-target CoC, attributed events and hooks, executable runtime artifacts and intrinsics, metadata signatures, macros, CLR, `byref`, arrays, native and runtime queries, transactions, and execution limits:
+The standalone .NET Framework 4.7.2 conformance suite currently contains 113 tests covering the parser, classes, compiled base/interface identity and callbacks, script/AOS-target CoC, attributed events and hooks, executable runtime artifacts and intrinsics, metadata signatures, macros, CLR, `byref`, arrays, native and runtime queries, transactions, and execution limits:
 
 ```powershell
 dotnet msbuild Projects\XppInterpreter.Tests\XppInterpreter.Tests.csproj /t:Rebuild /p:Configuration=Debug
