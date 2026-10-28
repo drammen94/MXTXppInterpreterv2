@@ -29,6 +29,32 @@ public final class MXTXppInterpreterService
 ]]></Source>
 			</Method>
 			<Method>
+				<Name>executeCell</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs one notebook cell; cells with the same SessionId share variables, classes and imports.
+    /// </summary>
+    [SysEntryPointAttribute(true)]
+    public MXTXppInterpreterExecutionResponse executeCell(MXTXppNotebookCellRequest _request)
+    {
+        return MXTXppInterpreterExecutor::executeNotebookCell(_request);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>resetNotebook</Name>
+				<Source><![CDATA[
+    /// <summary>Drops a notebook session.</summary>
+    [SysEntryPointAttribute(true)]
+    public MXTXppInterpreterExecutionResponse resetNotebook(MXTXppNotebookCellRequest _request)
+    {
+        return MXTXppInterpreterExecutor::resetNotebook(_request);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
 				<Name>runConformance</Name>
 				<Source><![CDATA[
     /// <summary>

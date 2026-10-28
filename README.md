@@ -42,19 +42,35 @@ Measured against a Unified AOS environment on 2026-09-03:
 
 The server column is a single returned sample; the HTTP percentiles are measured across repeated requests. The deployment helper for a Unified development environment is `Scripts\Deploy-MXTXppUdeModule.ps1`. These measurements predate the hot-path work below and have not been re-taken on an AOS yet.
 
-### Interactive session
+### Notebook session
 
-`Start-MXTXppSession.ps1` keeps one keep-alive connection and one cached token for the whole session, so each run is a single request instead of a new TLS handshake plus an Azure CLI token call:
+`Start-MXTXppSession.ps1` works like a Jupyter notebook. It keeps one keep-alive connection, one cached token and one notebook session on the AOS: variables, script classes, functions and `using` imports declared by a cell stay available to every later cell. Nothing is compiled to metadata, deployed or synchronized.
 
 ```powershell
-# Prompt: type X++, finish with an empty line, :q quits
+# Prompt: type X++ and finish a cell with an empty line; :vars, :reset, :q
 .\Scripts\Start-MXTXppSession.ps1
 
-# Rerun a file every time it is saved
+# A file of cells separated by // %% lines; each save reruns the first changed cell and the ones after it
 .\Scripts\Start-MXTXppSession.ps1 -Watch .\scratch.xpp
+
+# Keep the cells' database work instead of rolling it back
+.\Scripts\Start-MXTXppSession.ps1 -Commit
 ```
 
-The same warm client is available as a module (`Import-Module .\Scripts\MXTXppClient.psm1`, then `Connect-MXTXpp` and `Invoke-MXTXpp`).
+```xpp
+// %% cell 1
+class Greeter { public str hello(str name) { return 'Hello ' + name; } }
+Greeter greeter = new Greeter();
+int calls = 0;
+
+// %% cell 2: uses cell 1's class and variables
+calls++;
+info(greeter.hello('cell ' + int2str(calls)));
+```
+
+On the AOS, the service operations are `executeCell` (`SessionId`, `SourceCode`, `Commit`) and `resetNotebook`. Each session lives in the AOS process (`NotebookKernel`). Cells of one session run one at a time. A session is dropped after 60 minutes idle, when more than 64 are open, or when the AOS recycles. Running an unchanged cell again reuses its bytecode, including loops already compiled to IL. Declaring a variable, class or function again replaces the earlier one. A cell that fails to parse leaves the session unchanged. Each cell runs in its own transaction: it is rolled back unless `Commit` is set, so without it, records a cell inserted are gone by the next cell.
+
+The same client is available as a module: `Import-Module .\Scripts\MXTXppClient.psm1`, then `Connect-MXTXpp` and `Invoke-MXTXppCell`, or `Invoke-MXTXpp` for a one-off run with no notebook state.
 
 ### Native conformance
 

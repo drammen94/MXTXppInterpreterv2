@@ -22,6 +22,12 @@ namespace XppInterpreter.Parser
         public bool InClassMethod { get; set; }
 
         /// <summary>
+        /// Notebook cells: a top-level declaration replaces an earlier one with the same name instead of
+        /// conflicting with it, so a cell can be run again or redefine a variable or class
+        /// </summary>
+        public bool ReplaceGlobalDeclarations { get; set; }
+
+        /// <summary>
         /// Script-declared classes, visible to the whole script
         /// </summary>
         public ClassDeclarationTable DeclaredClasses { get; } = new ClassDeclarationTable();

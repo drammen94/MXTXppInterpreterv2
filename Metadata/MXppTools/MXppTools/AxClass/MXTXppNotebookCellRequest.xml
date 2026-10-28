@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppNotebookCellRequest</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Request contract for one notebook cell. Cells with the same SessionId share variables,
+/// script classes and imports in the AOS process. Commit = false rolls the cell's database
+/// work back; Commit = true commits it.
+/// </summary>
+[DataContract]
+public final class MXTXppNotebookCellRequest
+{
+    str sessionId;
+    str sourceCode;
+    boolean commit;
+    str requestId;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>parmSessionId</Name>
+				<Source><![CDATA[
+    [DataMember("SessionId")]
+    public str parmSessionId(str _sessionId = sessionId)
+    {
+        sessionId = _sessionId;
+        return sessionId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSourceCode</Name>
+				<Source><![CDATA[
+    [DataMember("SourceCode")]
+    public str parmSourceCode(str _sourceCode = sourceCode)
+    {
+        sourceCode = _sourceCode;
+        return sourceCode;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCommit</Name>
+				<Source><![CDATA[
+    [DataMember("Commit")]
+    public boolean parmCommit(boolean _commit = commit)
+    {
+        commit = _commit;
+        return commit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmRequestId</Name>
+				<Source><![CDATA[
+    [DataMember("RequestId")]
+    public str parmRequestId(str _requestId = requestId)
+    {
+        requestId = _requestId;
+        return requestId;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

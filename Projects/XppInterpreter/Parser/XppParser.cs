@@ -71,6 +71,17 @@ namespace XppInterpreter.Parser
             return new ParseResult(expression, parser._parseErrors);
         }
 
+        /// <summary>
+        /// Parses a program against an existing parse context, so declarations made by earlier
+        /// programs (notebook cells) stay visible and new ones are added to it
+        /// </summary>
+        public static ParseResult ParseWithContext(ILexer lexer, Interpreter.Proxy.XppProxy xppProxy, ParseContext parseContext)
+        {
+            var parser = new XppParser(lexer, xppProxy);
+            parser._parseContext = parseContext;
+            return parser.Parse();
+        }
+
         public ParseResult Parse()
         {
             Initialize();
@@ -1439,6 +1450,11 @@ namespace XppInterpreter.Parser
                         IsConst = isConst
                     };
 
+                    if (_parseContext.ReplaceGlobalDeclarations && _parseContext.CurrentScope.IsGlobal())
+                    {
+                        _parseContext.CurrentScope.VariableDeclarations.RemoveAll(v => string.Equals(v.Name, scopeVariable.Name, StringComparison.OrdinalIgnoreCase));
+                    }
+
                     _parseContext.CurrentScope.VariableDeclarations.Add(scopeVariable);
                 }
 
@@ -2561,7 +2577,7 @@ namespace XppInterpreter.Parser
                 }
             }
 
-            if (_parseContext.DeclaredClasses.Contains(className))
+            if (_parseContext.DeclaredClasses.Contains(className) && !_parseContext.ReplaceGlobalDeclarations)
             {
                 HandleParseError($"Class {className} is already declared.", stop: false);
             }

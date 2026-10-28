@@ -103,6 +103,7 @@ function Connect-MXTXpp {
         EnvironmentUrl = $resolvedUrl
         ServiceRoot = $resolvedUrl + '/api/services/MXTXppInterpreterServiceGroup/MXTXppInterpreterService'
         Client = $client
+        NotebookId = [Guid]::NewGuid().ToString('D')
         FixedToken = $AccessToken
         Token = $null
         TokenExpiresUtc = [DateTimeOffset]::MinValue
@@ -120,6 +121,8 @@ function Connect-MXTXpp {
 
 function Disconnect-MXTXpp {
     if ($script:Session -and $script:Session.Client) {
+        # Frees the notebook's variables on the AOS; the session also expires there when idle
+        try { Reset-MXTXppNotebook } catch { }
         $script:Session.Client.Dispose()
     }
 
@@ -185,6 +188,60 @@ function Invoke-MXTXpp {
     }
 }
 
+function Invoke-MXTXppCell {
+    <#
+    .SYNOPSIS
+        Runs one notebook cell. Cells of the same notebook share variables, script classes and
+        using imports on the AOS; nothing is compiled to metadata.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)] [string] $SourceCode,
+        [switch] $Commit
+    )
+
+    process {
+        if (-not $script:Session) {
+            throw 'Run Connect-MXTXpp first.'
+        }
+
+        $requestId = [Guid]::NewGuid().ToString('D')
+        $request = @{ SessionId = $script:Session.NotebookId; SourceCode = $SourceCode; Commit = [bool]$Commit; RequestId = $requestId }
+        $body = @{ _request = $request } | ConvertTo-Json -Depth 5 -Compress
+        $result = Invoke-MXTXppOperation -Operation 'executeCell' -JsonBody $body
+        $response = $result.Body
+
+        [pscustomobject]@{
+            Success = [bool]$response.Success
+            Output = $response.Output
+            Error = $response.Error
+            Variables = $response.Variables
+            CellNumber = [int]$response.CellNumber
+            Cached = [bool]$response.CacheHit
+            HttpMilliseconds = [Math]::Round($result.HttpMilliseconds, 1)
+            ServerMilliseconds = [Math]::Round(([double]$response.TotalMicroseconds / 1000), 2)
+            ParseMilliseconds = [Math]::Round(([double]$response.ParseMicroseconds / 1000), 2)
+            ExecuteMilliseconds = [Math]::Round(([double]$response.ExecuteMicroseconds / 1000), 2)
+            RolledBack = [bool]$response.RolledBack
+            RequestId = $requestId
+        }
+    }
+}
+
+function Reset-MXTXppNotebook {
+    <#
+    .SYNOPSIS
+        Drops the notebook's variables, classes and imports on the AOS and starts a fresh one.
+    #>
+    if (-not $script:Session) {
+        return
+    }
+
+    $body = @{ _request = @{ SessionId = $script:Session.NotebookId } } | ConvertTo-Json -Depth 5 -Compress
+    [void](Invoke-MXTXppOperation -Operation 'resetNotebook' -JsonBody $body)
+    $script:Session.NotebookId = [Guid]::NewGuid().ToString('D')
+}
+
 function Write-MXTXppResult {
     param([Parameter(Mandatory)] $Result)
 
@@ -197,7 +254,9 @@ function Write-MXTXppResult {
     }
 
     $color = if ($Result.Success) { 'DarkGray' } else { 'DarkRed' }
-    Write-Host ("[{0} ms round trip, {1} ms on server, rolled back]" -f $Result.HttpMilliseconds, $Result.ServerMilliseconds) -ForegroundColor $color
+    $database = if ($Result.RolledBack -or -not $Result.Success) { 'rolled back' } else { 'committed' }
+    $cell = if ($Result.PSObject.Properties['CellNumber'] -and $Result.CellNumber) { "cell $($Result.CellNumber), " } else { '' }
+    Write-Host ("[{0}{1} ms round trip, {2} ms on server, {3}]" -f $cell, $Result.HttpMilliseconds, $Result.ServerMilliseconds, $database) -ForegroundColor $color
 }
 
-Export-ModuleMember -Function Connect-MXTXpp, Disconnect-MXTXpp, Invoke-MXTXpp, Invoke-MXTXppOperation, Write-MXTXppResult
+Export-ModuleMember -Function Connect-MXTXpp, Disconnect-MXTXpp, Invoke-MXTXpp, Invoke-MXTXppCell, Reset-MXTXppNotebook, Invoke-MXTXppOperation, Write-MXTXppResult

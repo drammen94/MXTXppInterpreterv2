@@ -15,5 +15,7 @@
 		<AxServiceOperation><Name>getModule</Name><Method>getModule</Method></AxServiceOperation>
 		<AxServiceOperation><Name>listModules</Name><Method>listModules</Method></AxServiceOperation>
 		<AxServiceOperation><Name>runConformance</Name><Method>runConformance</Method></AxServiceOperation>
+		<AxServiceOperation><Name>executeCell</Name><Method>executeCell</Method></AxServiceOperation>
+		<AxServiceOperation><Name>resetNotebook</Name><Method>resetNotebook</Method></AxServiceOperation>
 	</ServiceOperations>
 </AxService>

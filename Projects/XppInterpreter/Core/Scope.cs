@@ -100,6 +100,13 @@ namespace XppInterpreter.Core
             if (forceOnTop)
             {
                 VariableCollection.TryGet(varName, out existing);
+
+                // Declaring a name again with another type (a re-run notebook cell) starts a new variable
+                if (existing != null && declarationType != null && existing.DeclarationType != declarationType)
+                {
+                    VariableCollection.Remove(varName);
+                    existing = null;
+                }
             }
 
             if (current != null)

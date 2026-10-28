@@ -23,6 +23,9 @@ public final class MXTXppInterpreterExecutionResponse
     str moduleName;
     int moduleVersion;
     boolean cacheHit;
+    str sessionId;
+    int cellNumber;
+    str variables;
 }
 ]]></Declaration>
 		<Methods>
@@ -178,6 +181,42 @@ public final class MXTXppInterpreterExecutionResponse
     {
         cacheHit = _cacheHit;
         return cacheHit;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSessionId</Name>
+				<Source><![CDATA[
+    [DataMember("SessionId")]
+    public str parmSessionId(str _sessionId = sessionId)
+    {
+        sessionId = _sessionId;
+        return sessionId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCellNumber</Name>
+				<Source><![CDATA[
+    [DataMember("CellNumber")]
+    public int parmCellNumber(int _cellNumber = cellNumber)
+    {
+        cellNumber = _cellNumber;
+        return cellNumber;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmVariables</Name>
+				<Source><![CDATA[
+    [DataMember("Variables")]
+    public str parmVariables(str _variables = variables)
+    {
+        variables = _variables;
+        return variables;
     }
 
 ]]></Source>

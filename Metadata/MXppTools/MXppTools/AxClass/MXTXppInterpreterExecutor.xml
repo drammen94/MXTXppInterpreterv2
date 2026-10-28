@@ -92,6 +92,19 @@ internal final class MXTXppInterpreterExecutor
     /// </summary>
     public static XppInterpreter.Lexer.XppLexer createLexer(str _sourceCode)
     {
+        return new XppInterpreter.Lexer.XppLexer(_sourceCode, MXTXppInterpreterExecutor::createMacroPreprocessor());
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createMacroPreprocessor</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates a macro preprocessor that resolves D365FO macro dictionaries.
+    /// </summary>
+    public static XppInterpreter.Lexer.MacroPreprocessor createMacroPreprocessor()
+    {
         XppInterpreter.Lexer.MacroPreprocessor preprocessor = new XppInterpreter.Lexer.MacroPreprocessor();
 
         try
@@ -110,7 +123,7 @@ internal final class MXTXppInterpreterExecutor
             // metadata isn't available in the current deployment topology.
         }
 
-        return new XppInterpreter.Lexer.XppLexer(_sourceCode, preprocessor);
+        return preprocessor;
     }
 
 ]]></Source>
@@ -580,6 +593,186 @@ internal final class MXTXppInterpreterExecutor
 
         totalWatch.Stop();
         response.parmTotalMicroseconds(MXTXppInterpreterExecutor::elapsedMicroseconds(totalWatch));
+        return response;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>executeNotebookCell</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Runs one notebook cell in its session. Variables, script classes and imports declared by
+    /// earlier cells of the same session are visible, and the cell's own declarations stay for the
+    /// cells after it. Nothing is compiled to metadata. The cell's database work is rolled back
+    /// unless the request sets Commit.
+    /// </summary>
+    public static MXTXppInterpreterExecutionResponse executeNotebookCell(MXTXppNotebookCellRequest _request)
+    {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+
+        if (!_request || !_request.parmSessionId())
+        {
+            throw error("A notebook SessionId is required.");
+        }
+
+        str sourceCode = _request.parmSourceCode();
+        if (!sourceCode)
+        {
+            throw error("SourceCode is required.");
+        }
+
+        if (strLen(sourceCode) > 1000000)
+        {
+            throw error("SourceCode exceeds the 1,000,000 character cell limit.");
+        }
+
+        if (appl.ttsLevel() != 0)
+        {
+            throw error("Notebook cells require TTS level zero.");
+        }
+
+        MXTXppInterpreterExecutionResponse response = new MXTXppInterpreterExecutionResponse();
+        str requestId = _request.parmRequestId();
+        if (!requestId)
+        {
+            requestId = guid2Str(newGuid());
+        }
+        response.parmRequestId(requestId);
+        response.parmSessionId(_request.parmSessionId());
+
+        XppInterpreter.Interpreter.NotebookSession session = XppInterpreter.Interpreter.NotebookKernel::Open(_request.parmSessionId(), proxy);
+
+        if (!session.Enter(30000))
+        {
+            response.parmError("The notebook session is still running another cell.");
+            return response;
+        }
+
+        int firstInfologLine = infologLine() + 1;
+        boolean transactionStarted;
+        boolean commit = _request.parmCommit();
+        System.Diagnostics.Stopwatch totalWatch = System.Diagnostics.Stopwatch::StartNew();
+
+        try
+        {
+            if (!session.Preprocessor)
+            {
+                session.Preprocessor = MXTXppInterpreterExecutor::createMacroPreprocessor();
+            }
+
+            XppInterpreter.Interpreter.XppInterpreterOptions options = MXTXppInterpreterExecutor::newFastExecutionOptions();
+            XppInterpreter.Interpreter.Bytecode.ByteCode byteCode = session.CompileCell(sourceCode, proxy, options);
+            response.parmParseMicroseconds(session.LastParseMicroseconds);
+            response.parmCompileMicroseconds(session.LastCompileMicroseconds);
+            response.parmCacheHit(session.LastCompileCached);
+            response.parmCellNumber(session.CellCount);
+
+            if (!byteCode)
+            {
+                response.parmError(session.LastError ? session.LastError : "The cell did not parse correctly.");
+            }
+            else
+            {
+                response.parmInstructionCount(byteCode.Instructions.Count);
+                XppInterpreter.Interpreter.XppInterpreter interpreter = new XppInterpreter.Interpreter.XppInterpreter(proxy, options);
+
+                ttsbegin;
+                transactionStarted = true;
+
+                System.Diagnostics.Stopwatch executeWatch = System.Diagnostics.Stopwatch::StartNew();
+                interpreter.Interpret(
+                    byteCode,
+                    session.CreateContext(byteCode, proxy),
+                    true,
+                    XppInterpreter.Interpreter.Debug.DebugAction::None);
+                executeWatch.Stop();
+                response.parmExecuteMicroseconds(MXTXppInterpreterExecutor::elapsedMicroseconds(executeWatch));
+
+                if (commit)
+                {
+                    ttscommit;
+                }
+                else
+                {
+                    ttsabort;
+                    response.parmRolledBack(true);
+                }
+
+                transactionStarted = false;
+                response.parmSuccess(true);
+            }
+        }
+        catch (Exception::CLRError)
+        {
+            if (transactionStarted || appl.ttsLevel() > 0)
+            {
+                ttsabort;
+                transactionStarted = false;
+                response.parmRolledBack(true);
+            }
+
+            System.Exception clrException = CLRInterop::getLastException();
+            response.parmError(clrException ? clrException.ToString() : "The cell raised a CLR error.");
+        }
+        catch
+        {
+            if (transactionStarted || appl.ttsLevel() > 0)
+            {
+                ttsabort;
+                transactionStarted = false;
+                response.parmRolledBack(true);
+            }
+
+            str errorText;
+            if (infologLine() >= firstInfologLine)
+            {
+                errorText = MXTXppInterpreterExecutor::fastExecutionInfologText(firstInfologLine);
+            }
+            response.parmError(errorText ? errorText : "The cell raised an X++ error.");
+        }
+
+        if (transactionStarted || appl.ttsLevel() > 0)
+        {
+            ttsabort;
+            response.parmRolledBack(true);
+        }
+
+        response.parmVariables(session.DescribeVariables());
+        session.Exit();
+
+        if (infologLine() >= firstInfologLine)
+        {
+            response.parmOutput(MXTXppInterpreterExecutor::fastExecutionInfologText(firstInfologLine));
+        }
+
+        totalWatch.Stop();
+        response.parmTotalMicroseconds(MXTXppInterpreterExecutor::elapsedMicroseconds(totalWatch));
+        return response;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>resetNotebook</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Drops a notebook session with all its variables, classes and imports.
+    /// </summary>
+    public static MXTXppInterpreterExecutionResponse resetNotebook(MXTXppNotebookCellRequest _request)
+    {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+
+        if (!_request || !_request.parmSessionId())
+        {
+            throw error("A notebook SessionId is required.");
+        }
+
+        MXTXppInterpreterExecutionResponse response = new MXTXppInterpreterExecutionResponse();
+        response.parmSessionId(_request.parmSessionId());
+        response.parmRequestId(_request.parmRequestId());
+        XppInterpreter.Interpreter.NotebookKernel::Close(_request.parmSessionId());
+        response.parmSuccess(true);
         return response;
     }
 
