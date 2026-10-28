@@ -16,6 +16,79 @@ namespace XppInterpreter.Interpreter.Bytecode
             ByRefArguments = byRefArguments;
         }
 
+        /// <summary>
+        /// How a native receiver type dispatches this call. Metadata cannot change while
+        /// the bytecode is alive, so it is resolved once per receiver type (inline cache).
+        /// </summary>
+        private sealed class CallSiteTarget
+        {
+            public System.Type Type;
+            public ByteCode ByteCode;
+            public int DeclaredClassCount;
+            public RuntimeClassMethod CompiledExtension;
+            public bool ClrOnly;
+            public bool ViaExtension;
+        }
+
+        private CallSiteTarget _callSite;
+
+        private CallSiteTarget ResolveTarget(RuntimeContext context, object instance)
+        {
+            System.Type type = instance?.GetType();
+            int classCount = context.ByteCode?.DeclaredClasses?.Count ?? 0;
+            CallSiteTarget cached = _callSite;
+
+            if (cached != null && type != null && cached.Type == type &&
+                ReferenceEquals(cached.ByteCode, context.ByteCode) && cached.DeclaredClassCount == classCount)
+            {
+                return cached;
+            }
+
+            var target = new CallSiteTarget { Type = type, ByteCode = context.ByteCode, DeclaredClassCount = classCount };
+
+            target.CompiledExtension = ScriptClassRuntime.FindCompiledTargetExtension(context.ByteCode, type, Name, isStatic: false);
+
+            if (target.CompiledExtension is null)
+            {
+                target.ClrOnly = ClrBridge.IsClrOnlyInstance(context, instance);
+
+                if (!target.ClrOnly)
+                {
+                    // X++ extension methods: when the type has no such instance method,
+                    // obj.extMethod() resolves to <TypeName>_Extension::extMethod(obj, ...).
+                    // The existence check keeps real errors from an existing method intact.
+                    bool hasInstanceMethod = true;
+
+                    try
+                    {
+                        hasInstanceMethod = context.Proxy.Reflection.TypeHasMethod(type, Name);
+                    }
+                    catch
+                    {
+                    }
+
+                    if (!hasInstanceMethod)
+                    {
+                        try
+                        {
+                            var extensionType = context.Proxy.Casting.GetSystemTypeFromTypeName(type.Name + "_Extension");
+                            target.ViaExtension = extensionType != null && context.Proxy.Reflection.TypeHasMethod(extensionType, Name);
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+            }
+
+            if (type != null)
+            {
+                _callSite = target;
+            }
+
+            return target;
+        }
+
         public override void Execute(RuntimeContext context)
         {
             // A stale paused result from a previous, aborted execution must not
@@ -64,11 +137,8 @@ namespace XppInterpreter.Interpreter.Bytecode
                 return;
             }
 
-            RuntimeClassMethod compiledExtension = ScriptClassRuntime.FindCompiledTargetExtension(
-                context.ByteCode,
-                instance?.GetType(),
-                Name,
-                isStatic: false);
+            CallSiteTarget target = ResolveTarget(context, instance);
+            RuntimeClassMethod compiledExtension = target.CompiledExtension;
 
             if (compiledExtension != null)
             {
@@ -96,41 +166,14 @@ namespace XppInterpreter.Interpreter.Bytecode
 
             object returnValue;
 
-            if (ClrBridge.IsClrOnlyInstance(context, instance))
+            if (target.ClrOnly)
             {
                 returnValue = ClrBridge.InvokeInstance(instance, Name, arguments, out object[] fittedArguments);
                 WriteBackByRefArguments(context, fittedArguments);
             }
             else
             {
-                // X++ extension methods: when the type has no such instance method,
-                // obj.extMethod() resolves to <TypeName>_Extension::extMethod(obj, ...).
-                // The existence check keeps real errors from an existing method intact.
-                bool hasInstanceMethod = true;
-
-                try
-                {
-                    hasInstanceMethod = context.Proxy.Reflection.TypeHasMethod(instance.GetType(), Name);
-                }
-                catch
-                {
-                }
-
-                bool viaExtension = false;
-
-                if (!hasInstanceMethod)
-                {
-                    try
-                    {
-                        var extensionType = context.Proxy.Casting.GetSystemTypeFromTypeName(instance.GetType().Name + "_Extension");
-                        viaExtension = extensionType != null && context.Proxy.Reflection.TypeHasMethod(extensionType, Name);
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                if (viaExtension)
+                if (target.ViaExtension)
                 {
                     object[] extended = new object[arguments.Length + 1];
                     extended[0] = instance;

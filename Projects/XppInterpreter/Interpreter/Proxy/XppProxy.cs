@@ -23,10 +23,11 @@
         {
             Intrinsic = intrinsic;
             Binary = binary;
-            Casting = casting;
+            // Metadata questions are memoized process-wide; see MetadataCache
+            Casting = casting is null || casting is MetadataCachingCastingProxy ? casting : new MetadataCachingCastingProxy(casting);
             Unary = unary;
             Data = data;
-            Reflection = reflection;
+            Reflection = reflection is null || reflection is MetadataCachingReflectionProxy ? reflection : new MetadataCachingReflectionProxy(reflection);
             Exceptions = exceptions;
             QueryGeneration = queryGeneration;
         }

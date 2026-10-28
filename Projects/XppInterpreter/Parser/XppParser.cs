@@ -166,6 +166,27 @@ namespace XppInterpreter.Parser
             return new Block(stmts, SourceCodeBinding(start, end), DebuggeableBinding(start));
         }
 
+        /// <summary>
+        /// Body of if/while/for/do: X++ accepts either a block or a single statement.
+        /// A single statement gets its own scope, exactly like a braced block.
+        /// </summary>
+        internal Block ControlBody()
+        {
+            if (currentToken.TokenType == TType.LeftBrace)
+            {
+                return Block();
+            }
+
+            _parseContext.BeginScope();
+
+            var start = currentScanResult;
+            var statement = Statement();
+
+            _parseContext.EndScope();
+
+            return new Block(new List<Statement> { statement }, SourceCodeBinding(start, lastScanResult), DebuggeableBinding(start));
+        }
+
         internal Constructor Constructor()
         {
             var start = currentScanResult;
@@ -1255,7 +1276,7 @@ namespace XppInterpreter.Parser
 
             var endIfResult = Match(TType.RightParenthesis);
 
-            Block block = Block();
+            Block block = ControlBody();
 
             If @else = null;
 
@@ -1295,7 +1316,7 @@ namespace XppInterpreter.Parser
 
             using (new LoopControlContext(_parseContext))
             { 
-                return new While(condition, Block(),
+                return new While(condition, ControlBody(),
                     SourceCodeBinding(bindingStart, lastScanResult),
                     SourceCodeBinding(bindingStart, bindingEnds));
             }
@@ -1319,7 +1340,7 @@ namespace XppInterpreter.Parser
 
             using (new LoopControlContext(_parseContext))
             { 
-                @for = new For(initialisation, expression, loopStmt, Block(), 
+                @for = new For(initialisation, expression, loopStmt, ControlBody(),
                     SourceCodeBinding(start, lastScanResult), 
                     SourceCodeBinding(start, end));
             }
@@ -1334,8 +1355,8 @@ namespace XppInterpreter.Parser
             var start = Match(TType.Do);
 
             using (new LoopControlContext(_parseContext))
-            { 
-                Block block = Block();
+            {
+                Block block = ControlBody();
                 Match(TType.While);
                 Match(TType.LeftParenthesis);
                 Expression expression = Expression();

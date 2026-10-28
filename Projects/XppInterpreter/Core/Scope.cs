@@ -43,36 +43,63 @@ namespace XppInterpreter.Core
 
         public object GetVar(string varName)
         {
-            Scope declaringScope = FindScopeContaining(varName);
-
-            if (declaringScope != null)
+            if (FindScopeContaining(varName, out VariableEntry entry) != null)
             {
-                return declaringScope.VariableCollection[varName].Value;
+                return entry.Value;
             }
 
             throw new Exception($"Variable {varName} was not declared.");
         }
 
-        private Scope FindScopeContaining(string varName)
+        private Scope FindScopeContaining(string varName, out VariableEntry entry)
         {
-            if (VariableCollection.Exists(varName))
+            // Walk the parent chain iteratively; only branch into secondary parents when they exist
+            for (Scope scope = this; scope != null; scope = scope.Parent)
             {
-                return this;
+                if (scope.VariableCollection.TryGet(varName, out entry))
+                {
+                    return scope;
+                }
+
+                if (scope.SecondaryParent != null)
+                {
+                    Scope found = scope.Parent?.FindScopeContaining(varName, out entry);
+
+                    return found ?? scope.SecondaryParent.FindScopeContaining(varName, out entry);
+                }
             }
 
-            Scope declaringScope = Parent?.FindScopeContaining(varName);
-            return declaringScope ?? SecondaryParent?.FindScopeContaining(varName);
+            entry = null;
+            return null;
+        }
+
+        // Primitive type keywords are reserved words, so they can never name a string EDT
+        private static readonly HashSet<string> _primitiveTypeNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "int", "int64", "real", "boolean", "str", "date", "utcdatetime", "timeofday", "guid", "container", "anytype", "var", "void"
+        };
+
+        internal static bool IsStringEdtTypeName(string typeName, Interpreter.Proxy.IXppCastingProxy castingProxy)
+        {
+            return castingProxy != null &&
+                !string.IsNullOrEmpty(typeName) &&
+                !_primitiveTypeNames.Contains(typeName) &&
+                castingProxy.IsStringEDT(typeName);
         }
 
         public void SetVar(string varName, object varValue, Interpreter.Proxy.IXppCastingProxy castingProxy, bool forceOnTop = false, Type declarationType = null, string typeName = null)
         {
-            Scope current = forceOnTop ? this : FindScopeContaining(varName);
+            VariableEntry existing = null;
+            Scope current = forceOnTop ? this : FindScopeContaining(varName, out existing);
+
+            if (forceOnTop)
+            {
+                VariableCollection.TryGet(varName, out existing);
+            }
 
             if (current != null)
             {
-                bool exists = current.VariableCollection.Exists(varName);
-
-                if (!exists)
+                if (existing is null)
                 {
                     if (declarationType != null)
                     {
@@ -96,7 +123,7 @@ namespace XppInterpreter.Core
                             value = varValue;
                         }
 
-                        if (!string.IsNullOrEmpty(typeName) && castingProxy.IsStringEDT(typeName))
+                        if (IsStringEdtTypeName(typeName, castingProxy))
                         {
                             value = castingProxy.TruncateEDTString(value as string, typeName);
                         }
@@ -110,7 +137,7 @@ namespace XppInterpreter.Core
                 }
                 else
                 {
-                    var entry = current.VariableCollection[varName];
+                    var entry = existing;
                     var entryTypeName = entry.TypeName;
 
                     object value = varValue;
@@ -130,7 +157,7 @@ namespace XppInterpreter.Core
                         }
                     }
 
-                    if (castingProxy != null && !string.IsNullOrEmpty(entryTypeName) && castingProxy.IsStringEDT(entryTypeName))
+                    if (castingProxy != null && entry.IsStringEdt(castingProxy))
                     {
                         value = castingProxy.TruncateEDTString(value as string, entryTypeName);
                     }

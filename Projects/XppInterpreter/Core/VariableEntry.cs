@@ -32,5 +32,20 @@ namespace XppInterpreter.Core
         {
             Value = value;
         }
+
+        private bool? _isStringEdt;
+
+        /// <summary>
+        /// EDT metadata cannot change during execution, so the proxy is asked once per variable
+        /// </summary>
+        internal bool IsStringEdt(Interpreter.Proxy.IXppCastingProxy castingProxy)
+        {
+            if (_isStringEdt is null)
+            {
+                _isStringEdt = Scope.IsStringEdtTypeName(TypeName, castingProxy);
+            }
+
+            return _isStringEdt.Value;
+        }
     }
 }

@@ -289,6 +289,20 @@ namespace XppInterpreter.Tests
                     capture(99);
                 }
             ", new XppInterpreterOptions { MaxLoopIterations = 2 }, "Max loop counter"));
+            Run("integer fast path matches proxy arithmetic", TestIntegerFastPath);
+            Run("int overflow is left to the native runtime", () => ExpectRuntimeError(@"
+                int value = 2147483647;
+                value = value + 1;
+            ", null, "OverflowException"));
+            Run("int64 overflow is left to the native runtime", () => ExpectRuntimeError(@"
+                int64 value = 9223372036854775807;
+                value = value * 2;
+            ", null, "OverflowException"));
+            Run("hot CLR overloads keep per-signature selection", TestHotClrOverloads);
+            Run("hot CLR calls surface exceptions like reflection", TestHotClrExceptions);
+            Run("hot CLR calls fall back for null value-type arguments", TestHotClrNullArgument);
+            Run("polymorphic CLR call site dispatches per receiver type", TestPolymorphicCallSite);
+            Run("single-statement bodies work without braces", TestBracelessBodies);
 
             if (Failures.Count == 0)
             {
@@ -1150,6 +1164,123 @@ namespace XppInterpreter.Tests
             Equal(710, Convert.ToInt32(TestProxyFactory.LastCaptured), "CLR optional/params result");
         }
 
+        private static void TestIntegerFastPath()
+        {
+            Execute(@"
+                int a = 7;
+                int b = -3;
+                int64 c = 5000000000;
+                int score = 0;
+                if (a > b) { score += 1; }
+                if (b < a) { score += 2; }
+                if (a >= 7) { score += 4; }
+                if (b <= -3) { score += 8; }
+                if (a != b) { score += 16; }
+                if (!(a == b)) { score += 32; }
+                if (c > a) { score += 64; }
+                if ((a & 3) == 3 && (a | 8) == 15 && (a ^ 2) == 5) { score += 128; }
+                if (true == true && false != true) { score += 256; }
+                if (a * b + a - b == -11) { score += 512; }
+                if (c + c == 10000000000 && c - 1 == 4999999999) { score += 1024; }
+                capture(score);
+            ");
+            Equal(2047, Convert.ToInt32(TestProxyFactory.LastCaptured), "integer fast path");
+        }
+
+        private static void TestBracelessBodies()
+        {
+            Execute(@"
+                int score = 0;
+                int i;
+                int a = 1;
+                int b = 0;
+                if (a == 1) score += 1;
+                if (a == 2) score += 1000; else score += 2;
+                if (a == 1) if (b == 1) score += 1000; else score += 4;
+                for (i = 0; i < 3; i++) score += 8;
+                i = 0;
+                while (i < 2) i++;
+                if (i == 2) score += 32;
+                do i--; while (i > 0);
+                if (i == 0) score += 64;
+                capture(score);
+            ");
+            Equal(1 + 2 + 4 + 24 + 32 + 64, Convert.ToInt32(TestProxyFactory.LastCaptured), "braceless bodies");
+        }
+
+        private static void TestHotClrOverloads()
+        {
+            Execute(@"
+                using XppInterpreter.Tests;
+                str result = '';
+                for (int i = 0; i < 40; i++)
+                {
+                    result = ClrInteropFixture::Choose(i) + ',' + ClrInteropFixture::Choose(2.5);
+                }
+                capture(result);
+            ");
+            Equal("int:39,real:2.5", Convert.ToString(TestProxyFactory.LastCaptured), "hot overload selection");
+        }
+
+        private static void TestHotClrExceptions()
+        {
+            Execute(@"
+                using XppInterpreter.Tests;
+                int caught = 0;
+                for (int i = 0; i < 40; i++)
+                {
+                    try
+                    {
+                        ClrInteropFixture::FailAt(i, 30);
+                    }
+                    catch
+                    {
+                        caught = i;
+                    }
+                }
+                capture(caught);
+            ");
+            Equal(30, Convert.ToInt32(TestProxyFactory.LastCaptured), "hot call exception");
+        }
+
+        private static void TestHotClrNullArgument()
+        {
+            Execute(@"
+                using XppInterpreter.Tests;
+                int total = 0;
+                for (int i = 0; i < 20; i++)
+                {
+                    total += ClrInteropFixture::Twice(i);
+                }
+                capture(total);
+            ");
+            Equal(380, Convert.ToInt32(TestProxyFactory.LastCaptured), "hot call total");
+        }
+
+        private static void TestPolymorphicCallSite()
+        {
+            Execute(@"
+                using System.Text;
+                str result = '';
+                System.Object value;
+                for (int i = 0; i < 40; i++)
+                {
+                    if (i mod 2 == 0)
+                    {
+                        value = new StringBuilder('sb');
+                    }
+                    else
+                    {
+                        value = new System.Version(1, 2);
+                    }
+                    result = value.ToString() + result;
+                }
+                capture(result);
+            ");
+            string expected = string.Concat(Enumerable.Repeat("1.2sb", 20));
+            Equal(expected, Convert.ToString(TestProxyFactory.LastCaptured), "polymorphic dispatch");
+        }
+
         private static void TestClrByRefWriteBack()
         {
             Execute(@"
@@ -1417,6 +1548,19 @@ namespace XppInterpreter.Tests
         public static void Increment(ref int value)
         {
             value++;
+        }
+
+        public static void FailAt(int value, int failure)
+        {
+            if (value == failure)
+            {
+                throw new InvalidOperationException("failed at " + value);
+            }
+        }
+
+        public static int Twice(int value)
+        {
+            return value * 2;
         }
     }
 

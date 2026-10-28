@@ -14,7 +14,7 @@
             var value = context.Stack.Pop();
 
             // Script class instances are truthy like any non-null object reference
-            bool condition = value is ScriptObject || context.Proxy.Casting.ToBoolean(value);
+            bool condition = value is bool boolean ? boolean : value is ScriptObject || context.Proxy.Casting.ToBoolean(value);
 
             if (condition)
             {

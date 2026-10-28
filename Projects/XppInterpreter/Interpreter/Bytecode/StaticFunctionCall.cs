@@ -49,7 +49,8 @@ namespace XppInterpreter.Interpreter.Bytecode
 
             var arguments = GetParametersFromStack(context.Stack);
 
-            var scriptClass = string.IsNullOrEmpty(ClassName) ? null : context.ByteCode.FindDeclaredClass(ClassName);
+            CallSiteTarget target = ResolveTarget(context);
+            var scriptClass = target.ScriptClass;
 
             if (scriptClass != null)
             {
@@ -69,24 +70,7 @@ namespace XppInterpreter.Interpreter.Bytecode
                 return;
             }
 
-            System.Type compiledTargetType = ClrType;
-
-            if (compiledTargetType is null && !string.IsNullOrEmpty(ClassName))
-            {
-                try
-                {
-                    compiledTargetType = context.Proxy.Casting.GetSystemTypeFromTypeName(ClassName);
-                }
-                catch
-                {
-                }
-            }
-
-            RuntimeClassMethod compiledExtension = ScriptClassRuntime.FindCompiledTargetExtension(
-                context.ByteCode,
-                compiledTargetType,
-                Name,
-                isStatic: true);
+            RuntimeClassMethod compiledExtension = target.CompiledExtension;
 
             if (compiledExtension != null)
             {
@@ -143,6 +127,60 @@ namespace XppInterpreter.Interpreter.Bytecode
             {
                 context.Stack.Push(returnValue);
             }
+        }
+
+        /// <summary>
+        /// The call target of a static call site only depends on the bytecode it runs in,
+        /// so the class and extension lookups are resolved once and reused
+        /// </summary>
+        private sealed class CallSiteTarget
+        {
+            public ByteCode ByteCode;
+            public int DeclaredClassCount;
+            public RuntimeClass ScriptClass;
+            public RuntimeClassMethod CompiledExtension;
+        }
+
+        private CallSiteTarget _callSite;
+
+        private CallSiteTarget ResolveTarget(RuntimeContext context)
+        {
+            int classCount = context.ByteCode?.DeclaredClasses?.Count ?? 0;
+            CallSiteTarget cached = _callSite;
+
+            if (cached != null && ReferenceEquals(cached.ByteCode, context.ByteCode) && cached.DeclaredClassCount == classCount)
+            {
+                return cached;
+            }
+
+            var target = new CallSiteTarget { ByteCode = context.ByteCode, DeclaredClassCount = classCount };
+            target.ScriptClass = string.IsNullOrEmpty(ClassName) ? null : context.ByteCode.FindDeclaredClass(ClassName);
+
+            // Without script classes there can be no compiled-target extensions, so the type lookup is skipped
+            if (target.ScriptClass is null && classCount > 0)
+            {
+                System.Type compiledTargetType = ClrType;
+
+                if (compiledTargetType is null && !string.IsNullOrEmpty(ClassName))
+                {
+                    try
+                    {
+                        compiledTargetType = context.Proxy.Casting.GetSystemTypeFromTypeName(ClassName);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                target.CompiledExtension = ScriptClassRuntime.FindCompiledTargetExtension(
+                    context.ByteCode,
+                    compiledTargetType,
+                    Name,
+                    isStatic: true);
+            }
+
+            _callSite = target;
+            return target;
         }
 
         public override object MakeCall(RuntimeContext context, object[] arguments)

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 
@@ -34,44 +35,100 @@ namespace XppInterpreter.Core
             return Activator.CreateInstance(makeType, arg1, arg2);
         }
 
+        /// <summary>
+        /// Case-insensitive member lookup tables, built once per type. Types are immutable at
+        /// runtime, and a weak table lets emitted script types be collected with their assembly.
+        /// The first member in reflection order wins, matching the previous FirstOrDefault scans.
+        /// </summary>
+        private sealed class MemberIndex
+        {
+            private readonly Type _type;
+            private Dictionary<string, MethodInfo> _methods;
+            private readonly Dictionary<string, PropertyInfo>[] _properties = new Dictionary<string, PropertyInfo>[2];
+            private readonly Dictionary<string, FieldInfo>[] _fields = new Dictionary<string, FieldInfo>[2];
+
+            public MemberIndex(Type type)
+            {
+                _type = type;
+            }
+
+            public MethodInfo Method(string name)
+            {
+                var methods = _methods ?? (_methods = Index(_type.GetMethods()));
+                return name != null && methods.TryGetValue(name, out MethodInfo method) ? method : null;
+            }
+
+            public PropertyInfo Property(string name, bool includeNonPublic)
+            {
+                int slot = includeNonPublic ? 1 : 0;
+                var properties = _properties[slot] ?? (_properties[slot] = Index(_type.GetProperties(GetBindingFlags(includeNonPublic))));
+                return name != null && properties.TryGetValue(name, out PropertyInfo property) ? property : null;
+            }
+
+            public FieldInfo Field(string name, bool includeNonPublic)
+            {
+                int slot = includeNonPublic ? 1 : 0;
+                var fields = _fields[slot] ?? (_fields[slot] = Index(_type.GetFields(GetBindingFlags(includeNonPublic))));
+                return name != null && fields.TryGetValue(name, out FieldInfo field) ? field : null;
+            }
+
+            private static Dictionary<string, T> Index<T>(T[] members) where T : MemberInfo
+            {
+                var index = new Dictionary<string, T>(members.Length, StringComparer.OrdinalIgnoreCase);
+
+                foreach (T member in members)
+                {
+                    if (member.Name != null && !index.ContainsKey(member.Name))
+                    {
+                        index.Add(member.Name, member);
+                    }
+                }
+
+                return index;
+            }
+        }
+
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Type, MemberIndex> _memberIndexes =
+            new System.Runtime.CompilerServices.ConditionalWeakTable<Type, MemberIndex>();
+
+        private static MemberIndex Members(Type type)
+        {
+            // Index construction is idempotent, so a lost race only builds a duplicate table
+            return _memberIndexes.GetValue(type, t => new MemberIndex(t));
+        }
+
         public static bool TypeHasMethod(Type type, string methodName)
         {
             if (type is null) return false;
 
-            return type.GetMethods().Any(m => m.Name?.ToLower() == methodName.ToLower());
+            return Members(type).Method(methodName) != null;
         }
 
         public static bool TypeHasProperty(Type type, string propertyName, bool includeNonPublic = false)
         {
             if (type is null) return false;
-            return type.GetProperties(GetBindingFlags(includeNonPublic)).Any(p => p.Name?.ToLower() == propertyName.ToLower());
+            return Members(type).Property(propertyName, includeNonPublic) != null;
         }
 
         public static bool TypeHasField(Type type, string fieldName, bool includeNonPublic)
         {
             if (type is null) return false;
-            return type.GetFields(GetBindingFlags(includeNonPublic)).Any(f => f.Name?.ToLower() == fieldName.ToLower());
+            return Members(type).Field(fieldName, includeNonPublic) != null;
         }
 
         public static string GetMethodInvariantName(Type type, string methodName)
         {
-            return TypeHasMethod(type, methodName)
-                ? type.GetMethods().FirstOrDefault(m => m.Name.ToLowerInvariant() == methodName.ToLowerInvariant()).Name
-                : null;
+            return type is null ? null : Members(type).Method(methodName)?.Name;
         }
 
         public static PropertyInfo GetProperty(Type type, string propertyName, bool includeNonPublic = false)
         {
-            return TypeHasProperty(type, propertyName, includeNonPublic)
-                ? type.GetProperties(GetBindingFlags(includeNonPublic)).FirstOrDefault(p => p.Name.ToLowerInvariant() == propertyName.ToLowerInvariant())
-                : null;
+            return type is null ? null : Members(type).Property(propertyName, includeNonPublic);
         }
 
         public static FieldInfo GetField(Type type, string fieldName, bool includeNonPublic = false)
         {
-            return TypeHasField(type, fieldName, includeNonPublic)
-                ? type.GetFields(GetBindingFlags(includeNonPublic)).FirstOrDefault(f => f.Name.ToLowerInvariant() == fieldName.ToLowerInvariant())
-                : null;
+            return type is null ? null : Members(type).Field(fieldName, includeNonPublic);
         }
 
         private static BindingFlags GetBindingFlags(bool includeNonPublic)
@@ -88,11 +145,7 @@ namespace XppInterpreter.Core
 
         public static MethodInfo GetMethod(Type type, string methodName)
         {
-            string invariantMethodName = GetMethodInvariantName(type, methodName);
-
-            return !string.IsNullOrEmpty(invariantMethodName)
-                ? type.GetMethods().FirstOrDefault(m => m.Name.ToLowerInvariant() == methodName.ToLowerInvariant())
-                : null;
+            return type is null ? null : Members(type).Method(methodName);
         }
 
         public static bool TypeImplementsInterface(Type type, Type interfaceType)

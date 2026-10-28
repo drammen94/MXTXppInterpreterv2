@@ -6,9 +6,15 @@ namespace XppInterpreter.Core
 {
     public class VariableCollection : IEnumerable
     {
-        private Dictionary<string, VariableEntry> _var = new Dictionary<string, VariableEntry>(StringComparer.InvariantCultureIgnoreCase);
+        // X++ identifiers are case-insensitive; ordinal comparison avoids culture lookups on every variable access
+        private Dictionary<string, VariableEntry> _var = new Dictionary<string, VariableEntry>(StringComparer.OrdinalIgnoreCase);
 
         public VariableEntry this[string key] { get => _var[key]; set => _var[key] = value; }
+
+        public bool TryGet(string name, out VariableEntry entry)
+        {
+            return _var.TryGetValue(name, out entry);
+        }
 
         public void Remove(string key)
         {

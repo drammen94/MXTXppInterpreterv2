@@ -28,13 +28,12 @@ namespace XppInterpreter.Interpreter.Bytecode
             object instance,
             object[] arguments)
         {
-            RuntimeClassMethod[] handlers = FindHandlers(context.ByteCode, targetTypeName, methodName, before: true).ToArray();
-            RuntimeClassMethod[] postHandlers = FindHandlers(context.ByteCode, targetTypeName, methodName, before: false).ToArray();
+            RuntimeClassMethod[] handlers = GetHandlers(context.ByteCode, targetTypeName, methodName, before: true);
+            RuntimeClassMethod[] postHandlers = GetHandlers(context.ByteCode, targetTypeName, methodName, before: false);
 
             var invocation = new Invocation
             {
                 Arguments = arguments ?? new object[0],
-                ParameterNames = ResolveParameterNames(context, targetTypeName, methodName, arguments?.Length ?? 0),
             };
 
             if (handlers.Length == 0 && postHandlers.Length == 0)
@@ -42,6 +41,8 @@ namespace XppInterpreter.Interpreter.Bytecode
                 return invocation;
             }
 
+            // Parameter names are only needed to populate XppPrePostArgs for actual handlers
+            invocation.ParameterNames = ResolveParameterNames(context, targetTypeName, methodName, invocation.Arguments.Length);
             invocation.EventArgs = CreateEventArgs(context, instance, methodName, before: true);
             PopulateArguments(context, invocation);
 
@@ -64,7 +65,7 @@ namespace XppInterpreter.Interpreter.Bytecode
             Invocation invocation,
             object returnValue)
         {
-            RuntimeClassMethod[] handlers = FindHandlers(context.ByteCode, targetTypeName, methodName, before: false).ToArray();
+            RuntimeClassMethod[] handlers = GetHandlers(context.ByteCode, targetTypeName, methodName, before: false);
             if (handlers.Length == 0) return returnValue;
 
             invocation = invocation ?? Before(context, targetTypeName, methodName, instance, new object[0]);
@@ -86,6 +87,29 @@ namespace XppInterpreter.Interpreter.Bytecode
             // post handlers ran, so null here is also meaningful: a handler may
             // deliberately replace a non-null result with null.
             return changed;
+        }
+
+        private static readonly RuntimeClassMethod[] _noHandlers = new RuntimeClassMethod[0];
+
+        // Handler attributes are fixed once bytecode is compiled, so each target method is scanned once per bytecode
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ByteCode, System.Collections.Concurrent.ConcurrentDictionary<string, RuntimeClassMethod[]>> _handlerCache =
+            new System.Runtime.CompilerServices.ConditionalWeakTable<ByteCode, System.Collections.Concurrent.ConcurrentDictionary<string, RuntimeClassMethod[]>>();
+
+        private static RuntimeClassMethod[] GetHandlers(ByteCode byteCode, string targetTypeName, string methodName, bool before)
+        {
+            if (byteCode?.DeclaredClasses is null || byteCode.DeclaredClasses.Count == 0) return _noHandlers;
+
+            var cache = _handlerCache.GetValue(byteCode, _ =>
+                new System.Collections.Concurrent.ConcurrentDictionary<string, RuntimeClassMethod[]>(StringComparer.OrdinalIgnoreCase));
+
+            // The class count guards against classes added to the bytecode after the first lookup
+            string key = (before ? "pre|" : "post|") + byteCode.DeclaredClasses.Count + "|" + targetTypeName + "|" + methodName;
+
+            return cache.GetOrAdd(key, _ =>
+            {
+                RuntimeClassMethod[] found = FindHandlers(byteCode, targetTypeName, methodName, before).ToArray();
+                return found.Length == 0 ? _noHandlers : found;
+            });
         }
 
         private static IEnumerable<RuntimeClassMethod> FindHandlers(

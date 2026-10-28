@@ -26,7 +26,11 @@ namespace XppInterpreter.Interpreter.Bytecode
             object right = context.Stack.Pop();
             object left = context.Stack.Pop();
 
-            object result = null;
+            if (TryFastPath(left, right, out object result))
+            {
+                context.Stack.Push(result);
+                return;
+            }
 
             switch (TokenType)
             {
@@ -108,6 +112,90 @@ namespace XppInterpreter.Interpreter.Bytecode
             }
 
             context.Stack.Push(result);
+        }
+
+        /// <summary>
+        /// Evaluates operations whose result cannot differ from native X++ without a proxy round trip.
+        /// Only same-type int/int64/bool operands qualify; anything that could overflow, round, or
+        /// depend on runtime conversion rules (real, str, mixed types, div, mod, shifts) goes to the proxy.
+        /// </summary>
+        private bool TryFastPath(object left, object right, out object result)
+        {
+            if (left is int l32 && right is int r32)
+            {
+                return TryInt64(l32, r32, out result, int.MinValue, int.MaxValue, true);
+            }
+
+            if (left is long l64 && right is long r64)
+            {
+                return TryInt64(l64, r64, out result, long.MinValue, long.MaxValue, false);
+            }
+
+            if (left is bool lb && right is bool rb)
+            {
+                switch (TokenType)
+                {
+                    case TType.Equal: result = lb == rb; return true;
+                    case TType.NotEqual: result = lb != rb; return true;
+                }
+            }
+
+            result = null;
+            return false;
+        }
+
+        private bool TryInt64(long l, long r, out object result, long min, long max, bool narrow)
+        {
+            long value;
+
+            switch (TokenType)
+            {
+                case TType.Equal: result = l == r; return true;
+                case TType.NotEqual: result = l != r; return true;
+                case TType.Greater: result = l > r; return true;
+                case TType.GreaterOrEqual: result = l >= r; return true;
+                case TType.Smaller: result = l < r; return true;
+                case TType.SmallerOrEqual: result = l <= r; return true;
+
+                case TType.BinaryAnd: value = l & r; break;
+                case TType.BinaryOr: value = l | r; break;
+                case TType.BinaryXOr: value = l ^ r; break;
+
+                // Overflow is left to the native runtime so its wrap/throw behaviour stays authoritative
+                case TType.Plus:
+                case TType.PlusAssignment:
+                case TType.Increment:
+                    value = unchecked(l + r);
+                    if (narrow ? (value < min || value > max) : (((l ^ value) & (r ^ value)) < 0)) { result = null; return false; }
+                    break;
+
+                case TType.Minus:
+                case TType.MinusAssignment:
+                case TType.Decrement:
+                    value = unchecked(l - r);
+                    if (narrow ? (value < min || value > max) : (((l ^ r) & (l ^ value)) < 0)) { result = null; return false; }
+                    break;
+
+                case TType.Star:
+                    // Two int32 operands always fit in int64; int64 products are only taken when provably in range
+                    if (!narrow && !FitsInt64Product(l, r)) { result = null; return false; }
+                    value = unchecked(l * r);
+                    if (value < min || value > max) { result = null; return false; }
+                    break;
+
+                default:
+                    result = null;
+                    return false;
+            }
+
+            result = narrow ? (object)(int)value : value;
+            return true;
+        }
+
+        private static bool FitsInt64Product(long l, long r)
+        {
+            const long limit = 3037000499; // floor(sqrt(long.MaxValue))
+            return l >= -limit && l <= limit && r >= -limit && r <= limit;
         }
 
         /// <summary>
