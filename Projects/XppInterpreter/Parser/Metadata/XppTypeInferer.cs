@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.ServiceModel.Security;
 using System.Text;
 using System.Threading.Tasks;
 using XppInterpreter.Interpreter;
@@ -9,21 +10,58 @@ using XppInterpreter.Lexer;
 
 namespace XppInterpreter.Parser.Metadata
 {
-    class XppTypeInferer : ITypeInferExpressionVisitor
+    internal class XppTypeInferer : ITypeInferExpressionVisitor
     {
         private System.Type _globalType, _predefinedType, _customPredefinedType;
         private readonly XppProxy _proxy;
+        private readonly System.Func<ParseContext> _parseContextAccessor;
+        private readonly System.Func<Core.ClrTypeResolver> _clrResolverAccessor;
         private bool _calledStatically;
         private ParseContext _context;
 
-        public XppTypeInferer(XppProxy proxy)
+        public XppTypeInferer(XppProxy proxy, System.Func<ParseContext> parseContextAccessor = null, System.Func<Core.ClrTypeResolver> clrResolverAccessor = null)
         {
             _proxy = proxy;
+            _parseContextAccessor = parseContextAccessor;
+            _clrResolverAccessor = clrResolverAccessor;
 
             // initialize types
             _globalType = _proxy.Casting.GetSystemTypeFromTypeName("Global");
             _predefinedType = _proxy.Casting.GetSystemTypeFromTypeName("PredefinedFunctions");
             _customPredefinedType = _proxy.Intrinsic.GetCustomPredefinedFunctionProvider();
+        }
+
+        /// <summary>
+        /// Resolves a type name through the X++ metadata proxy first, then
+        /// script-declared classes, then .NET types honoring using directives
+        /// </summary>
+        public System.Type InferType(string typeName)
+        {
+            System.Type proxyType = null;
+
+            try
+            {
+                proxyType = _proxy.Casting.GetSystemTypeFromTypeName(typeName);
+            }
+            catch
+            {
+                // Names unknown to the X++ metadata (dotted CLR names) may throw
+            }
+
+            if (proxyType != null)
+            {
+                return proxyType;
+            }
+
+            ParseContext context = _context ?? _parseContextAccessor?.Invoke();
+            ClassDeclarationInfo scriptClass = context?.DeclaredClasses.Find(typeName);
+
+            if (scriptClass != null)
+            {
+                return scriptClass.Type;
+            }
+
+            return _clrResolverAccessor?.Invoke()?.Resolve(typeName);
         }
 
         public System.Type InferType(Expression expression, ParseContext context)
@@ -35,7 +73,7 @@ namespace XppInterpreter.Parser.Metadata
                 calledStatic = variable.StaticCall;
             }
 
-            return InferType(expression, calledStatic, _context);
+            return InferType(expression, calledStatic, context ?? _context);
         }
 
         public System.Type InferType(Expression expression, bool calledStatic, ParseContext context)
@@ -96,7 +134,89 @@ namespace XppInterpreter.Parser.Metadata
 
         public System.Type VisitConstructor(Constructor constructor)
         {
-            return _proxy.Casting.GetSystemTypeFromTypeName(constructor.ClassName);
+            return InferType(constructor.ClassName);
+        }
+
+        /// <summary>
+        /// True for types only reachable through direct CLR reflection (not X++ metadata)
+        /// </summary>
+        internal bool IsClrOnlyType(System.Type type)
+        {
+            if (type is null || type is Core.ScriptClassType) return false;
+
+            try
+            {
+                return _proxy.Casting.GetSystemTypeFromTypeName(type.Name) != type;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private System.Type GetScriptClassMethodReturnType(Core.ScriptClassType scriptClassType, string methodName)
+        {
+            var info = (ClassDeclarationInfo)scriptClassType.DeclarationInfo;
+            var method = info.FindMethod(methodName);
+
+            if (method is null)
+            {
+                method = _context.DeclaredClasses.FindExtensionMethod(info, methodName);
+            }
+
+            if (method is null)
+            {
+                // Members not declared in the script chain may live on a compiled base
+                var compiledBase = info.FindCompiledBase();
+
+                if (compiledBase != null)
+                {
+                    try
+                    {
+                        return _proxy.Reflection.GetMethodReturnType(compiledBase, methodName);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                return null;
+            }
+
+            if (method.ReturnType.TokenType == Lexer.TType.Void) return typeof(void);
+
+            return method.ReturnClrType ?? InferType(method.ReturnType.Lexeme);
+        }
+
+        private System.Type GetScriptClassFieldType(Core.ScriptClassType scriptClassType, string fieldName)
+        {
+            var info = (ClassDeclarationInfo)scriptClassType.DeclarationInfo;
+            var field = info.FindField(fieldName);
+
+            if (field is null)
+            {
+                field = _context.DeclaredClasses.FindExtensionField(info, fieldName);
+            }
+
+            if (field is null)
+            {
+                var compiledBase = info.FindCompiledBase();
+
+                if (compiledBase != null)
+                {
+                    try
+                    {
+                        return _proxy.Reflection.GetFieldReturnType(compiledBase, fieldName);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                return null;
+            }
+
+            return field.ClrType ?? InferType(field.Type.Lexeme);
         }
 
         public System.Type VisitContainerInitialisation(ContainerInitialisation containerInitialisation)
@@ -106,6 +226,28 @@ namespace XppInterpreter.Parser.Metadata
 
         public System.Type VisitFunctionCall(FunctionCall functionCall)
         {
+            if (functionCall is NextCallExpression nextCall)
+            {
+                if (nextCall.TargetMethod is null || nextCall.TargetMethod.ReturnType.TokenType == TType.Void)
+                {
+                    return typeof(void);
+                }
+
+                return nextCall.TargetMethod.ReturnClrType ?? InferType(nextCall.TargetMethod.ReturnType.Lexeme);
+            }
+
+            if (functionCall is SuperCallExpression superCall)
+            {
+                var baseMethod = superCall.DeclaringClass?.BaseClass?.FindMethod(superCall.MethodName);
+
+                if (baseMethod is null || baseMethod.ReturnType.TokenType == TType.Void)
+                {
+                    return typeof(void);
+                }
+
+                return baseMethod.ReturnClrType ?? InferType(baseMethod.ReturnType.Lexeme);
+            }
+
             if (functionCall.Caller != null)
             {
                 bool staticSave = _calledStatically;
@@ -115,9 +257,46 @@ namespace XppInterpreter.Parser.Metadata
 
                 _calledStatically = staticSave;
 
+                if (callerType is Core.ScriptClassType scriptClassType)
+                {
+                    return GetScriptClassMethodReturnType(scriptClassType, functionCall.Name);
+                }
+
                 if (callerType != null)
                 {
-                    return _proxy.Reflection.GetMethodReturnType(callerType, functionCall.Name);
+                    ClassMethodSignature interpretedExtension = _context?.DeclaredClasses
+                        .FindCompiledTargetExtensionMethod(callerType, functionCall.Name, functionCall.StaticCall);
+
+                    if (interpretedExtension != null)
+                    {
+                        return interpretedExtension.ReturnClrType ?? InferType(interpretedExtension.ReturnType.Lexeme);
+                    }
+
+                    if (IsClrOnlyType(callerType))
+                    {
+                        return Core.ReflectionHelper.GetMethod(callerType, functionCall.Name)?.ReturnType;
+                    }
+
+                    System.Type methodReturnType = _proxy.Reflection.GetMethodReturnType(callerType, functionCall.Name);
+
+                    // X++ extension methods: TypeName_Extension::method(obj, ...)
+                    if (methodReturnType is null)
+                    {
+                        try
+                        {
+                            var extensionType = _proxy.Casting.GetSystemTypeFromTypeName(callerType.Name + "_Extension");
+
+                            if (extensionType != null)
+                            {
+                                methodReturnType = _proxy.Reflection.GetMethodReturnType(extensionType, functionCall.Name);
+                            }
+                        }
+                        catch
+                        {
+                        }
+                    }
+
+                    return methodReturnType;
                 }
             }
             else if (IsGlobalFunction(functionCall.Name))
@@ -163,7 +342,7 @@ namespace XppInterpreter.Parser.Metadata
 
         public bool IsKnownType(string typeName)
         {
-            return _proxy.Casting.GetSystemTypeFromTypeName(typeName) != null;
+            return InferType(typeName) != null;
         }
 
         public System.Type VisitVariable(Variable variable)
@@ -178,6 +357,22 @@ namespace XppInterpreter.Parser.Metadata
                 _calledStatically = staticSave;
 
                 if (callerType is null) return null;
+
+                if (callerType is Core.ScriptClassType scriptClassType)
+                {
+                    return GetScriptClassFieldType(scriptClassType, variable.Name);
+                }
+
+                if (IsClrOnlyType(callerType))
+                {
+                    if (callerType.IsEnum)
+                    {
+                        return callerType;
+                    }
+
+                    return Core.ReflectionHelper.GetProperty(callerType, variable.Name)?.PropertyType
+                        ?? Core.ReflectionHelper.GetField(callerType, variable.Name)?.FieldType;
+                }
 
                 if (callerType.IsEnum)
                 {
@@ -208,7 +403,6 @@ namespace XppInterpreter.Parser.Metadata
                         }
 
                         return GetTypeFromWord((Word)declaration.Type);
-
                     }
                 }
             }
@@ -219,7 +413,7 @@ namespace XppInterpreter.Parser.Metadata
         private System.Type GetTypeFromWord(Word word)
         {
             if (word is null) return null;
-            return _proxy.Casting.GetSystemTypeFromTypeName(word.Lexeme);
+            return InferType(word.Lexeme);
         }
 
         public System.Type GetTypeFromUserFunctionDeclaration(string functionName, ParseContext context = null)
@@ -228,7 +422,12 @@ namespace XppInterpreter.Parser.Metadata
 
             if (declarationReference != null)
             {
-                return _proxy.Casting.GetSystemTypeFromTypeName(declarationReference.ReturnType.Lexeme);
+                if (declarationReference.ReturnType.TokenType == TType.Void)
+                {
+                    return typeof(void);
+                }
+
+                return InferType(declarationReference.ReturnType.Lexeme);
             }
 
             return null;
@@ -236,12 +435,37 @@ namespace XppInterpreter.Parser.Metadata
 
         public System.Type VisitIs(Is @is)
         {
-            return _proxy.Casting.GetSystemTypeFromTypeName(@is.TypeName);
+            return typeof(bool);
         }
 
         public System.Type VisitAs(As @as)
         {
-            return _proxy.Casting.GetSystemTypeFromTypeName(@as.TypeName);
+            return InferType(@as.TypeName);
+        }
+
+        public System.Type VisitSelectExpression(SelectExpression selectExpression)
+        {
+            var bufferType = _proxy.Casting.GetSystemTypeFromTypeName(selectExpression.Query.TableVariableName);
+
+            if (bufferType != null)
+            {
+                return _proxy.Reflection.GetFieldReturnType(bufferType, selectExpression.ReturnField);
+            }
+
+            return null;
+        }
+
+        public System.Type VisitTableField(TableField tableField)
+        {
+
+            var bufferType = _proxy.Casting.GetSystemTypeFromTypeName(tableField.TableName);
+
+            if (bufferType != null)
+            {
+                return _proxy.Reflection.GetFieldReturnType(bufferType, tableField.FieldName);
+            }
+
+            return null;
         }
     }
 }

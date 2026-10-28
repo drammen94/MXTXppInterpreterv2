@@ -49,7 +49,57 @@ namespace XppInterpreter.Interpreter.Bytecode
                 var caller = context.Stack.Pop();
                 var value = GetValue(context);
 
-                if (IsArray)
+                if (caller is ScriptObject scriptObject)
+                {
+                    RuntimeClassField scriptField = scriptObject.Class.FindField(Name);
+
+                    if (scriptField is null && context.ActiveClass?.ExtensionTarget != null &&
+                        scriptObject.Class.IsOrExtends(context.ActiveClass.ExtensionTarget.Name))
+                    {
+                        scriptField = context.ActiveClass.FindField(Name, walkBaseChain: false);
+                    }
+
+                    if (scriptField is null)
+                    {
+                        scriptField = scriptObject.Class.FindExtensionField(Name, isStatic: false);
+                    }
+
+                    if (scriptField != null)
+                    {
+                        if (scriptField.IsStatic)
+                        {
+                            throw new Exception($"Static field {scriptField.DeclaringClass.Name}.{Name} must be accessed through its class.");
+                        }
+
+                        ScriptClassRuntime.EnsureFieldAccessible(scriptField, context.ActiveClass, writing: true);
+                    }
+
+                    global::XppInterpreter.Core.Scope fieldScope = ScriptClassRuntime.GetInstanceFieldScope(context, scriptObject, scriptField);
+
+                    if (IsArray)
+                    {
+                        var scriptArray = fieldScope.GetVar(Name);
+                        context.Proxy.Casting.SetArrayIndexValue(scriptArray, index, value);
+                    }
+                    else
+                    {
+                        try
+                        {
+                            fieldScope.SetVar(Name, value, context.Proxy.Casting);
+                        }
+                        catch when (scriptObject.Class.FindCompiledBaseName() != null)
+                        {
+                            // Forward unknown members to the wrapped compiled base instance
+                            object baseInstance = ScriptClassRuntime.EnsureBaseInstance(context, scriptObject);
+                            context.Proxy.Reflection.SetInstanceProperty(baseInstance, Name, value);
+                        }
+                    }
+                }
+                else if (!IsArray && ClrBridge.IsClrOnlyInstance(context, caller))
+                {
+                    ClrBridge.SetMember(caller.GetType(), caller, Name, ScriptClassRuntime.MarshalToNative(value));
+                }
+                else if (IsArray)
                 {
                     // Get the instance property array and assign the value to the corresponding index
                     var array = context.Proxy.Reflection.GetInstanceProperty(caller, Name);
@@ -57,7 +107,7 @@ namespace XppInterpreter.Interpreter.Bytecode
                 }
                 else
                 {
-                    context.Proxy.Reflection.SetInstanceProperty(caller, Name, value);
+                    context.Proxy.Reflection.SetInstanceProperty(caller, Name, ScriptClassRuntime.MarshalToNative(value));
                 }
             }
             else
@@ -78,11 +128,11 @@ namespace XppInterpreter.Interpreter.Bytecode
                         if (value is null && context.Proxy.Reflection.IsCommonType(ClrType))
                         {
                             var defaultValue = context.Proxy.Casting.GetDefaultValueForType(TypeName);
-                            context.ScopeHandler.CurrentScope.SetVar(Name, defaultValue, context.Proxy.Casting, Top, ClrType);
+                            context.ScopeHandler.CurrentScope.SetVar(Name, defaultValue, context.Proxy.Casting, Top, ClrType, TypeName);
                         }
                         else
                         {
-                            context.ScopeHandler.CurrentScope.SetVar(Name, value, context.Proxy.Casting, Top, ClrType);
+                            context.ScopeHandler.CurrentScope.SetVar(Name, value, context.Proxy.Casting, Top, ClrType, TypeName);
                         }
                     }
                     else

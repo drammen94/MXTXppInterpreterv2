@@ -15,6 +15,11 @@ namespace XppInterpreter.Parser
         public bool IsArray { get; }
         public System.Type ClrType { get; }
 
+        /// <summary>
+        /// True for const/readonly declarations; assignment is rejected at parse time
+        /// </summary>
+        public bool IsConst { get; set; }
+
         public ParseContextScopeVariable(string varName, Word type, System.Type clrType, bool isArray, Expression initialization = null)
         {
             Name = varName;

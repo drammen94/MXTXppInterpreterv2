@@ -7,6 +7,7 @@
         public void Execute(RuntimeContext context)
         {
             context.Proxy.Data.TtsAbort();
+            context.Models.AbortTransaction();
 
             if (context.ScopeHandler.AreExceptionsHandled)
             {

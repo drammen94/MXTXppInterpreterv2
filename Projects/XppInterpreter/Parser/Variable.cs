@@ -12,6 +12,13 @@ namespace XppInterpreter.Parser
         public Expression Caller { get; }
         public bool StaticCall { get; }
 
+        /// <summary>
+        /// Set when this identifier is a reference to a .NET type unknown to the X++
+        /// metadata proxies (used as the caller of :: static member access), so the
+        /// access must be routed through direct CLR reflection
+        /// </summary>
+        public System.Type ClrTypeReference { get; set; }
+
         public Variable(Word identifier, Expression caller, bool staticCall, SourceCodeBinding sourceCodeBinding) : base(identifier, sourceCodeBinding)
         {
             Caller = caller;

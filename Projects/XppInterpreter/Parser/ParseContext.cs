@@ -1,4 +1,7 @@
 ﻿using System;
+using XppInterpreter.Core;
+using XppInterpreter.Interpreter.Proxy;
+using XppInterpreter.Lexer;
 
 namespace XppInterpreter.Parser
 {
@@ -13,9 +16,46 @@ namespace XppInterpreter.Parser
         internal readonly ParseContextStack FinallyStack = new ParseContextStack();
         internal readonly ParseContextStack CatchStack = new ParseContextStack();
 
+        /// <summary>
+        /// True while parsing the body of a script-declared class method
+        /// </summary>
+        public bool InClassMethod { get; set; }
+
+        /// <summary>
+        /// Script-declared classes, visible to the whole script
+        /// </summary>
+        public ClassDeclarationTable DeclaredClasses { get; } = new ClassDeclarationTable();
+
+        /// <summary>
+        /// .NET namespace imports and aliases declared with using directives
+        /// </summary>
+        public ClrNamespaceContext ClrNamespaces { get; } = new ClrNamespaceContext();
+
         public ParseContext()
         {
             CurrentScope = _globalScope;
+        }
+
+        public static ParseContext FromRuntimeContext(Interpreter.RuntimeContext runtimeContext)
+        {
+            ParseContext parseContext = new ParseContext();
+
+            // Iterate all variables from the runtime context's current scope and add them to the parse context's current scope
+            using (var scopeEnumerator = new ScopeVariableEnumerator(runtimeContext.ScopeHandler.CurrentScope))
+            {
+                while (scopeEnumerator.MoveNext())
+                {
+                    var variableEntry = scopeEnumerator.Current;
+
+                    parseContext.CurrentScope.VariableDeclarations.Add(new ParseContextScopeVariable(
+                        variableEntry.Name,
+                        new Word("", TType.Var),
+                        variableEntry.DeclarationType,
+                        false));
+                }
+            }
+
+            return parseContext;
         }
 
         public bool CanScapeLoop()

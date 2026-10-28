@@ -55,9 +55,26 @@ namespace XppInterpreter.Interpreter
                 _nextAction = nextAction;
             }
 
-            RuntimeContext c = context != null ?
-                reuseCounter ? context : new RuntimeContext(context.Proxy, byteCode, context.ScopeHandler)
-                : new RuntimeContext(_proxy, byteCode);
+            RuntimeContext c;
+
+            if (context != null && reuseCounter)
+            {
+                c = context;
+            }
+            else if (context != null)
+            {
+                c = new RuntimeContext(context.Proxy, byteCode, context.ScopeHandler);
+                c.InheritExecutionState(context);
+            }
+            else
+            {
+                c = new RuntimeContext(_proxy, byteCode);
+            }
+
+            if (c.ExecutionGuard is null)
+            {
+                c.ExecutionGuard = new RuntimeExecutionGuard(Options);
+            }
 
             c.NextAction = _nextAction;
             c.InnerContext = context?.InnerContext;
@@ -68,100 +85,116 @@ namespace XppInterpreter.Interpreter
                 return InterpreterResult.Finished;
             }
 
-            bool isFirst = true;
+            c.ExecutionGuard.EnterExecution();
 
-            while (c.Counter < byteCode.Instructions.Count)
+            try
             {
-                var instruction = byteCode.Instructions[c.Counter];
+                bool isFirst = true;
 
-                if (instruction is Bytecode.Debug debug && (!isFirst || _isActionDefault))
+                while (c.Counter < byteCode.Instructions.Count)
                 {
-                    if (debug.Always && _nextAction != DebugAction.CancelExecution && _nextAction != DebugAction.StopDebugging)
-                    {
-                        return new InterpreterResult(new Debug.Breakpoint(debug.Debuggeable.DebuggeableBinding, debug.Debuggeable), new InterpreterSaveState(c, byteCode));
-                    }
-                    else if (_nextAction == DebugAction.Continue)
-                    {
-                        var breakpointHit = TryBreakpointHit(debug.Debuggeable);
+                    var instruction = byteCode.Instructions[c.Counter];
 
-                        if (breakpointHit != null)
+                    if (instruction is Bytecode.Debug debug && (!isFirst || _isActionDefault))
+                    {
+                        if (debug.Always && _nextAction != DebugAction.CancelExecution && _nextAction != DebugAction.StopDebugging)
                         {
-                            return new InterpreterResult(breakpointHit, new InterpreterSaveState(c, byteCode));
+                            return new InterpreterResult(new Debug.Breakpoint(debug.Debuggeable.DebuggeableBinding, debug.Debuggeable), new InterpreterSaveState(c, byteCode));
+                        }
+                        else if (_nextAction == DebugAction.Continue)
+                        {
+                            var breakpointHit = TryBreakpointHit(debug.Debuggeable);
+
+                            if (breakpointHit != null)
+                            {
+                                return new InterpreterResult(breakpointHit, new InterpreterSaveState(c, byteCode));
+                            }
+                        }
+                        else if (_nextAction == DebugAction.StepOver)
+                        {
+                            return new InterpreterResult(new Debug.Breakpoint(new SourceCodeRange(
+                                    new SourceCodeLocation(debug.Debuggeable.DebuggeableBinding.FromLine, debug.Debuggeable.DebuggeableBinding.FromPosition),
+                                    new SourceCodeLocation(debug.Debuggeable.DebuggeableBinding.ToLine, debug.Debuggeable.DebuggeableBinding.ToPosition)),
+                                    debug.Debuggeable),
+                                    new InterpreterSaveState(c, byteCode));
                         }
                     }
-                    else if (_nextAction == DebugAction.StepOver)
-                    {
-                        return new InterpreterResult(new Debug.Breakpoint(new SourceCodeRange(
-                                new SourceCodeLocation(debug.Debuggeable.DebuggeableBinding.FromLine, debug.Debuggeable.DebuggeableBinding.FromPosition),
-                                new SourceCodeLocation(debug.Debuggeable.DebuggeableBinding.ToLine, debug.Debuggeable.DebuggeableBinding.ToPosition)),
-                                debug.Debuggeable),
-                                new InterpreterSaveState(c, byteCode));
+
+                    isFirst = false;
+
+                    int pc = c.Counter;
+
+                    try
+                    { 
+                        c.ExecutionGuard.Checkpoint();
+
+                        if (c.ScopeHandler.AreExceptionsHandled)
+                        {
+                            c.ScopeHandler.CurrentExceptionHandler.SetNativeRetryCount(c);
+                        }
+
+                        instruction.Execute(c);
                     }
-                }
-
-                isFirst = false;
-
-                int pc = c.Counter;
-
-                try
-                { 
-                    if (c.ScopeHandler.AreExceptionsHandled)
+                    catch (System.Exception ex)
                     {
-                        c.ScopeHandler.CurrentExceptionHandler.SetNativeRetryCount(c);
-                    }
+                        if (ex is InterpreterLimitExceededException)
+                        {
+                            throw;
+                        }
 
-                    instruction.Execute(c);
-                }
-                catch (System.Exception ex)
-                {
-                    if (c.ScopeHandler.AreExceptionsHandled)
-                    {
-                        c.ScopeHandler.CurrentExceptionHandler.HandleException(ex, c);
-                    }
-                    else
-                    {
-                        throw ex;
-                    }
-                }
-
-                if (c.Returned)
-                {
-                    c.InnerContext = null;
-
-                    if (context != null)
-                    {
-                        context.Returned = true;
-                        context.InnerContext = null;
+                        if (c.ScopeHandler.AreExceptionsHandled)
+                        {
+                            c.ScopeHandler.CurrentExceptionHandler.HandleException(ex, c);
+                        }
+                        else
+                        {
+                            throw ex;
+                        }
                     }
 
-                    break;
-                }
-
-                if (instruction is IInterpretableInstruction interpretable)
-                {
-                    if (!interpretable.LastResult?.HasFinished ?? false)
-                    {
-                        return new InterpreterResult(interpretable.LastResult.Breakpoint, new InterpreterSaveState(c, byteCode));
-                    }
-                    else
+                    if (c.Returned)
                     {
                         c.InnerContext = null;
 
                         if (context != null)
                         {
+                            context.Returned = true;
                             context.InnerContext = null;
                         }
+
+                        break;
+                    }
+
+                    if (instruction is IInterpretableInstruction interpretable)
+                    {
+                        if (!interpretable.LastResult?.HasFinished ?? false)
+                        {
+                            return new InterpreterResult(interpretable.LastResult.Breakpoint, new InterpreterSaveState(c, byteCode));
+                        }
+                        else
+                        {
+                            c.InnerContext = null;
+
+                            if (context != null)
+                            {
+                                context.InnerContext = null;
+                            }
+                        }
+                    }
+
+                    // If no jump was executed, then increment the counter
+                    if (pc == c.Counter)
+                    {
+                        c.MoveCounter(1);
                     }
                 }
 
-                // If no jump was executed, then increment the counter
-                if (pc == c.Counter)
-                {
-                    c.MoveCounter(1);
-                }
+                return InterpreterResult.Finished;
             }
-
-            return InterpreterResult.Finished;
+            finally
+            {
+                c.ExecutionGuard.ExitExecution();
+            }
         }
 
         private Debug.Breakpoint TryBreakpointHit(IDebuggeable debuggeable)
@@ -214,11 +247,21 @@ namespace XppInterpreter.Interpreter
                 fullByteCode = new ByteCode();
             }
 
-            ByteCode compiledProgram = new ByteCodeGenerator(Options).Generate(program, IsDebuggerAttached(), fullByteCode.DeclaredFunctions);
+            ByteCode compiledProgram = new ByteCodeGenerator(Options).Generate(program, IsDebuggerAttached(), fullByteCode.DeclaredFunctions, fullByteCode.DeclaredClasses);
 
-            // We don't add declared functions as the bytecode generation
-            // for the full program already include the ref functions
+            fullByteCode.DeclaredFunctions.AddRange(compiledProgram.DeclaredFunctions);
+            // The generator aggregates dependency classes, so the returned list is complete
+            fullByteCode.DeclaredClasses = compiledProgram.DeclaredClasses;
             fullByteCode.Instructions.AddRange(compiledProgram.Instructions);
+
+            // Resolve base class references across dependency boundaries
+            foreach (var declaredClass in fullByteCode.DeclaredClasses)
+            {
+                if (declaredClass.BaseClass is null && declaredClass.BaseClassName != null)
+                {
+                    declaredClass.BaseClass = fullByteCode.FindDeclaredClass(declaredClass.BaseClassName);
+                }
+            }
 
 #if DEBUG
             foreach (var instruction in fullByteCode.Instructions)
@@ -236,15 +279,20 @@ namespace XppInterpreter.Interpreter
 
             foreach (var dependency in dependencies)
             {
-                var compiledDependency = new ByteCodeGenerator(Options).Generate(dependency, false , byteCode.DeclaredFunctions);
+                var compiledDependency = new ByteCodeGenerator(Options).Generate(dependency, false, byteCode.DeclaredFunctions, byteCode.DeclaredClasses);
 
                 // Merge dependencies
                 byteCode.Instructions.AddRange(compiledDependency.Instructions);
 
-                // Compiled bytecode contains aggregated function references
+                // Compiled bytecode contains aggregated function and class references
                 if (compiledDependency.DeclaredFunctions != null)
                 {
                     byteCode.DeclaredFunctions = compiledDependency.DeclaredFunctions;
+                }
+
+                if (compiledDependency.DeclaredClasses != null)
+                {
+                    byteCode.DeclaredClasses = compiledDependency.DeclaredClasses;
                 }
             }
 

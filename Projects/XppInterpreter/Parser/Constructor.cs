@@ -10,6 +10,12 @@ namespace XppInterpreter.Parser
     {
         public string ClassName => (Token as Word).Lexeme;
 
+        /// <summary>
+        /// Set when the class name resolved to a .NET type that the X++ metadata
+        /// proxies do not know, so instantiation must use direct CLR reflection
+        /// </summary>
+        public System.Type ResolvedClrType { get; set; }
+
         public Constructor(Word identifier, List<Expression> parameters, Expression caller, bool staticCall, SourceCodeBinding sourceCodeBinding, SourceCodeBinding debuggeableBinding) :
             base(identifier, parameters, caller, staticCall, false, sourceCodeBinding, debuggeableBinding)
         {

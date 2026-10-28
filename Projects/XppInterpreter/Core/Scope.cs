@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data.SqlTypes;
 using System.Linq;
 using XppInterpreter.Interpreter.Debug;
 using XppInterpreter.Interpreter.Proxy;
@@ -8,12 +9,12 @@ namespace XppInterpreter.Core
 {
     public class Scope
     {
-        internal readonly NormalizedScopeEntryHash _hash = new NormalizedScopeEntryHash();
         internal readonly VariableCollection VariableCollection = new VariableCollection();
         internal readonly List<object> disposables = new List<object>();
 
         public readonly Stack<object> Stack = new Stack<object>();
         public Scope Parent { get; set; }
+        public Scope SecondaryParent { get; set; }
 
         public Scope Begin()
         {
@@ -42,77 +43,112 @@ namespace XppInterpreter.Core
 
         public object GetVar(string varName)
         {
-            if (VariableCollection.Exists(varName))
+            Scope declaringScope = FindScopeContaining(varName);
+
+            if (declaringScope != null)
             {
-                return VariableCollection[varName].Value;
-            }
-            else if (Parent != null)
-            {
-                return Parent.GetVar(varName);
+                return declaringScope.VariableCollection[varName].Value;
             }
 
             throw new Exception($"Variable {varName} was not declared.");
         }
 
-        public void SetVar(string varName, object varValue, Interpreter.Proxy.IXppCastingProxy castingProxy, bool forceOnTop = false, Type declarationType = null)
+        private Scope FindScopeContaining(string varName)
         {
-            Scope current = this;
-            bool found = false;
+            if (VariableCollection.Exists(varName))
+            {
+                return this;
+            }
 
-            while (!found)
+            Scope declaringScope = Parent?.FindScopeContaining(varName);
+            return declaringScope ?? SecondaryParent?.FindScopeContaining(varName);
+        }
+
+        public void SetVar(string varName, object varValue, Interpreter.Proxy.IXppCastingProxy castingProxy, bool forceOnTop = false, Type declarationType = null, string typeName = null)
+        {
+            Scope current = forceOnTop ? this : FindScopeContaining(varName);
+
+            if (current != null)
             {
                 bool exists = current.VariableCollection.Exists(varName);
 
-                if (current != null && (exists || forceOnTop))
+                if (!exists)
                 {
-                    found = true;
-
-                    if (!exists)
+                    if (declarationType != null)
                     {
-                        if (declarationType != null)
-                        {
-                            object value;
+                        object value;
 
-                            if (varValue != null && varValue.GetType() != declarationType)
+                        if (varValue != null && varValue.GetType() != declarationType &&
+                            !(declarationType is ScriptClassType) && !declarationType.IsInstanceOfType(varValue) &&
+                            !IsCompatibleScriptProxy(varValue, declarationType))
+                        {
+                            if (declarationType.IsEnum)
                             {
-                                if (declarationType.IsEnum)
-                                {
-                                    value = Enum.ToObject(declarationType, varValue);
-                                }
-                                else
-                                {
-                                    value = castingProxy.Cast(varValue, declarationType);
-                                }
+                                value = Enum.ToObject(declarationType, varValue);
                             }
                             else
                             {
-                                value = varValue;
+                                value = castingProxy.Cast(varValue, declarationType);
                             }
-
-                            current.VariableCollection.Add(new VariableEntry(varName, declarationType, value));
                         }
                         else
                         {
-                            throw new Exception($"Variable {varName} is not declared.");
+                            value = varValue;
                         }
+
+                        if (!string.IsNullOrEmpty(typeName) && castingProxy.IsStringEDT(typeName))
+                        {
+                            value = castingProxy.TruncateEDTString(value as string, typeName);
+                        }
+
+                        current.VariableCollection.Add(new VariableEntry(varName, declarationType, value, typeName));
                     }
                     else
                     {
-                        current.VariableCollection[varName].SetValue(varValue);
+                        throw new Exception($"Variable {varName} is not declared.");
                     }
                 }
-                else if (current == null)
+                else
                 {
-                    break;
+                    var entry = current.VariableCollection[varName];
+                    var entryTypeName = entry.TypeName;
+
+                    object value = varValue;
+
+                    if (value != null && entry.DeclarationType != null &&
+                        !(entry.DeclarationType is ScriptClassType) &&
+                        !entry.DeclarationType.IsInstanceOfType(value) &&
+                        !IsCompatibleScriptProxy(value, entry.DeclarationType))
+                    {
+                        if (entry.DeclarationType.IsEnum)
+                        {
+                            value = Enum.ToObject(entry.DeclarationType, value);
+                        }
+                        else if (castingProxy != null)
+                        {
+                            value = castingProxy.Cast(value, entry.DeclarationType);
+                        }
+                    }
+
+                    if (castingProxy != null && !string.IsNullOrEmpty(entryTypeName) && castingProxy.IsStringEDT(entryTypeName))
+                    {
+                        value = castingProxy.TruncateEDTString(value as string, entryTypeName);
+                    }
+
+                    entry.SetValue(value);
                 }
 
-                current = current.Parent;
+                return;
             }
 
-            if (!found)
-            {
-                throw new Exception($"Variable {varName} is not declared.");
-            }
+            throw new Exception($"Variable {varName} is not declared.");
+        }
+
+        private static bool IsCompatibleScriptProxy(object value, Type declarationType)
+        {
+            var scriptObject = value as Interpreter.Bytecode.ScriptObject;
+            return scriptObject?.BaseInstance != null &&
+                declarationType.IsInstanceOfType(scriptObject.BaseInstance);
         }
 
         public NormalizedScopeEntry[] GetNormalizedScopeEntries(XppProxy proxy = null)
@@ -133,12 +169,8 @@ namespace XppInterpreter.Core
                     entry.EnumValues = proxy.Reflection.GetAllEnumValues(entry.TypeName).Cast<string>().ToArray();
                 }
 
-                entry.Changed = _hash.HasChanged(entry.VariableName, entry.Value);
-
                 ret.Add(entry);
             }
-
-            _hash.Update(ret);
 
             return ret.ToArray();
         }

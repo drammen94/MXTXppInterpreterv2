@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppInterpreterModuleListResponse</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+[DataContract]
+public final class MXTXppInterpreterModuleListResponse
+{
+    boolean success;
+    str error;
+    List modules = new List(Types::String);
+}
+]]></Declaration>
+		<Methods>
+			<Method><Name>parmSuccess</Name><Source><![CDATA[
+    [DataMember("Success")]
+    public boolean parmSuccess(boolean _value = success) { success = _value; return success; }
+]]></Source></Method>
+			<Method><Name>parmError</Name><Source><![CDATA[
+    [DataMember("Error")]
+    public str parmError(str _value = error) { error = _value; return error; }
+]]></Source></Method>
+			<Method><Name>parmModules</Name><Source><![CDATA[
+    [DataMember("Modules"), DataCollection(Types::String)]
+    public List parmModules(List _value = modules) { modules = _value; return modules; }
+]]></Source></Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

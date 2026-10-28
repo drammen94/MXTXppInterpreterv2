@@ -16,6 +16,8 @@ internal final class MXTXppQueryExpressionGenerator
     private RuntimeContext context;
     private Set tablesInQuery;
     private XppInterpreter.Interpreter.Query.QueryGenerationHelper generationHelper;
+    private Common buffer;
+    private boolean isExpression;
 
 }
 ]]></Declaration>
@@ -28,11 +30,13 @@ internal final class MXTXppQueryExpressionGenerator
     /// </summary>
     /// <param name = "_context">Runtime context</param>
     /// <param name = "_tablesInQuery">Tables in query</param>
-    void new(RuntimeContext _context, Set _tablesInQuery)
+    void new(RuntimeContext _context, Set _tablesInQuery, boolean _isExpression = false, Common _buffer = null)
     {
         context = _context;
         tablesInQuery = _tablesInQuery;
         generationHelper = new XppInterpreter.Interpreter.Query.QueryGenerationHelper(_context);
+        isExpression = _isExpression;
+        buffer = _buffer;
     }
 
 ]]></Source>
@@ -42,7 +46,11 @@ internal final class MXTXppQueryExpressionGenerator
 				<Source><![CDATA[
     public SysDaQueryExpression visitExpression(Parser.Expression _expression)
     {
-        if (_expression is Parser.BinaryOperation)
+        if (_expression is Parser.TableField)
+        {
+            return this.visitTableField(_expression);
+        }
+        else if (_expression is Parser.BinaryOperation)
         {
             return this.visitBinaryOperation(_expression);
         }
@@ -58,8 +66,31 @@ internal final class MXTXppQueryExpressionGenerator
         {
             return this.visitVariable(_expression);
         }
+        else if (!this.containsTableReference(_expression))
+        {
+            // Containers (the right side of "in"), ternaries, casts, and other
+            // expressions that don't depend on a row can be computed once.
+            return new SysDaValueExpression(generationHelper.ComputeExpression(_expression));
+        }
 
-        throw new System.NotImplementedException();
+        throw new System.Exception(strFmt("Query expression %1 contains a table-dependent construct that can't be translated to SysDa.", _expression.GetType().FullName));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>visitTableField</Name>
+				<Source><![CDATA[
+    private SysDaQueryExpression visitTableField(Parser.TableField _tableField)
+    {
+        Common fieldBuffer = buffer;
+
+        if (!fieldBuffer)
+        {
+            fieldBuffer = context.ScopeHandler.CurrentScope.GetVar(_tableField.TableName);
+        }
+
+        return new SysDaFieldExpression(fieldBuffer, _tableField.FieldName);
     }
 
 ]]></Source>
@@ -102,50 +133,17 @@ internal final class MXTXppQueryExpressionGenerator
 				<Source><![CDATA[
     private SysDaQueryExpression visitUnaryOperation(Parser.UnaryOperation _unaryOperation)
     {
-        SysDaQueryExpression left, right;
-
-        if (_unaryOperation.Expression is Parser.Variable)
+        if (_unaryOperation.Token.TokenType == Lexer.TType::Negation)
         {
-            Parser.Variable variable = _unaryOperation.Expression as Parser.Variable;
-
-            if (this.isVariableTable(variable))
-            {
-                Common common = generationHelper.ComputeVariable(variable.Caller);
-                Lexer.Word word = variable.Token;
-
-                left = new SysDaFieldExpression(common, word.Lexeme);
-                right = new SysDaValueExpression(generationHelper.GetDefaultValueForType(_unaryOperation.Expression.ReturnType));
-            }
-            else 
-            {
-                System.Object falseValue = generationHelper.GetDefaultValueForType(_unaryOperation.Expression.ReturnType);
-                left = new SysDaValueExpression(true);
-                
-                if (variable is Parser.FunctionCall)
-                {
-                    System.Object value = generationHelper.ComputeFunctionCall(variable);
-                    right = new SysDaValueExpression(falseValue == value);
-                }
-                else
-                {
-                    System.Object value = generationHelper.ComputeVariable(variable);
-                    right = new SysDaValueExpression(falseValue == value);
-                }
-            }
-        }
-        else if (_unaryOperation.Expression is Parser.Constant)
-        {
-            System.Boolean boolValue = context.Proxy.Casting.ToBoolean(generationHelper.ComputeConstant(_unaryOperation.Expression));
-            left = new SysDaValueExpression(true);
-
-            right = new SysDaValueExpression(!boolValue);
-        }
-        else
-        {
-            throw new System.Exception("Invalid unary expression.");
+            return new SysDaNotExpression(this.visitExpression(_unaryOperation.Expression));
         }
 
-        return new SysDaEqualsExpression(left, right);
+        if (!this.containsTableReference(_unaryOperation))
+        {
+            return new SysDaValueExpression(generationHelper.ComputeExpression(_unaryOperation));
+        }
+
+        throw new System.Exception("This table-dependent unary expression can't be translated to SysDa.");
     }
 
 ]]></Source>
@@ -174,6 +172,11 @@ internal final class MXTXppQueryExpressionGenerator
         }
         else if (_variable is Parser.FunctionCall)
         {
+            if (this.containsTableReference(_variable))
+            {
+                throw new System.Exception("A query function call that depends on a table field can't be evaluated as a constant value.");
+            }
+
             return new SysDaValueExpression(generationHelper.ComputeFunctionCall(_variable));
         }
         else
@@ -199,6 +202,115 @@ internal final class MXTXppQueryExpressionGenerator
             Lexer.Word word = _variable.Caller.Token;
 
             return tablesInQuery.in(word.Lexeme);
+        }
+
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>containsTableReference</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Determines row dependence using the buffers in this concrete query. A
+    /// qualified CLR/application member can therefore still be evaluated once,
+    /// while a member on any joined table remains a SysDa field expression.
+    /// </summary>
+    private boolean containsTableReference(Parser.Expression _expression)
+    {
+        if (_expression == null)
+        {
+            return false;
+        }
+
+        if (_expression is Parser.TableField)
+        {
+            return true;
+        }
+
+        if (_expression is Parser.BinaryOperation)
+        {
+            Parser.BinaryOperation binary = _expression;
+            return this.containsTableReference(binary.LeftOperand) ||
+                   this.containsTableReference(binary.RightOperand);
+        }
+
+        if (_expression is Parser.UnaryOperation)
+        {
+            Parser.UnaryOperation unary = _expression;
+            return this.containsTableReference(unary.Expression);
+        }
+
+        if (_expression is Parser.Ternary)
+        {
+            Parser.Ternary ternary = _expression;
+            return this.containsTableReference(ternary.Condition) ||
+                   this.containsTableReference(ternary.Left) ||
+                   this.containsTableReference(ternary.Right);
+        }
+
+        if (_expression is Parser.ContainerInitialisation)
+        {
+            Parser.ContainerInitialisation containerExpression = _expression;
+            System.Object[] containerElements = containerExpression.Elements.ToArray();
+            for (int elementIndex = 0; elementIndex < containerElements.Length; elementIndex++)
+            {
+                if (this.containsTableReference(containerElements.GetValue(elementIndex)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        if (_expression is Parser.Is)
+        {
+            Parser.Is typeTestExpression = _expression;
+            return this.containsTableReference(typeTestExpression.Expression);
+        }
+
+        if (_expression is Parser.As)
+        {
+            Parser.As asExpression = _expression;
+            return this.containsTableReference(asExpression.Expression);
+        }
+
+        if (_expression is Parser.Variable)
+        {
+            Parser.Variable variable = _expression;
+            if (this.isVariableTable(variable))
+            {
+                return true;
+            }
+
+            if (variable.Caller != null && this.containsTableReference(variable.Caller))
+            {
+                return true;
+            }
+
+            if (_expression is Parser.ArrayAccess)
+            {
+                Parser.ArrayAccess arrayAccess = _expression;
+                if (this.containsTableReference(arrayAccess.Index))
+                {
+                    return true;
+                }
+            }
+
+            if (_expression is Parser.FunctionCall)
+            {
+                Parser.FunctionCall functionCall = _expression;
+                var parameters = functionCall.Parameters.ToArray();
+                for (int parameterIndex = 0; parameterIndex < parameters.Length; parameterIndex++)
+                {
+                    if (this.containsTableReference(parameters.GetValue(parameterIndex)))
+                    {
+                        return true;
+                    }
+                }
+            }
         }
 
         return false;

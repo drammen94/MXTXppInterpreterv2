@@ -53,9 +53,9 @@ internal final class MXTXppQueryGenerator implements XppInterpreter.Interpreter.
 			<Method>
 				<Name>NewSearchInstance</Name>
 				<Source><![CDATA[
-    public XppInterpreter.Interpreter.Query.ISearchInstance NewSearchInstance(Parser.Data.Query _query, RuntimeContext _runtimeContext)
+    public XppInterpreter.Interpreter.Query.ISearchInstance NewSearchInstance(Parser.Data.Query _query, RuntimeContext _runtimeContext, boolean _isFromExpression, System.Object _buffer)
     {
-        SysDaQueryObject sysDaQuery = this.generateFromQuery(_query, _runtimeContext);
+        SysDaQueryObject sysDaQuery = this.generateFromQuery(_query, _runtimeContext, _isFromExpression, _buffer);
         SysDaSearchObject searchObject = new SysDaSearchObject(sysDaQuery);
         SysDaSearchStatement searchStatement = new SysDaSearchStatement();
 
@@ -63,9 +63,17 @@ internal final class MXTXppQueryGenerator implements XppInterpreter.Interpreter.
 
         if (_query.ValidTimeState != null)
         {
-            searchObject.validTimeState(new SysDaValidTimeStateDateRange(
-                generationHelper.ComputeVariable(_query.ValidTimeState.FromDate),
-                generationHelper.ComputeVariable(_query.ValidTimeState.ToDate)));
+            System.Object fromValue = generationHelper.ComputeExpression(_query.ValidTimeState.FromDate);
+            System.Object toValue = generationHelper.ComputeExpression(_query.ValidTimeState.ToDate);
+
+            if (fromValue != null && fromValue.GetType() == _runtimeContext.Proxy.Reflection.GetUtcDateTimeType())
+            {
+                searchObject.validTimeState(new SysDaValidTimeStateDateTimeRange(fromValue, toValue));
+            }
+            else
+            {
+                searchObject.validTimeState(new SysDaValidTimeStateDateRange(fromValue, toValue));
+            }
         }
 
         if (_query.CrossCompany != null)
@@ -76,7 +84,7 @@ internal final class MXTXppQueryGenerator implements XppInterpreter.Interpreter.
             }
             else
             {
-                searchObject.crossCompany(new SysDaCrossCompanyContainer(generationHelper.ComputeVariable(_query.CrossCompany.Container)));
+                searchObject.crossCompany(new SysDaCrossCompanyContainer(generationHelper.ComputeExpression(_query.CrossCompany.Container)));
             }
         }
 
@@ -183,13 +191,44 @@ internal final class MXTXppQueryGenerator implements XppInterpreter.Interpreter.
 			<Method>
 				<Name>generateFromQuery</Name>
 				<Source><![CDATA[
-    private SysDaQueryObject generateFromQuery(Parser.Data.Query _query, RuntimeContext _runtimeContext)
+    private SysDaQueryObject generateFromQuery(Parser.Data.Query _query, RuntimeContext _runtimeContext, boolean _isQueryExpression = false, Common _buffer = null)
     {
-        Common common = _runtimeContext.ScopeHandler.CurrentScope.GetVar(_query.TableVariableName);
+        Common common;
+        boolean isExpression = _isQueryExpression;
+
+        if (_isQueryExpression)
+        {
+            common = _buffer;
+        }
+        else
+        {
+            common = _runtimeContext.ScopeHandler.CurrentScope.GetVar(_query.TableVariableName);
+        }
 
         tablesInQuery.add(_query.TableVariableName);
 
         SysDaQueryObject sysDaQuery = new SysDaQueryObject(common);
+
+        if (_query.Index)
+        {
+            IndexId indexId = indexName2Id(common.TableId, _query.Index);
+
+            if (!indexId)
+            {
+                throw error(strFmt("Index %1 does not exist on table %2.", _query.Index, tableId2Name(common.TableId)));
+            }
+
+            // These are the same kernel operations emitted by native X++ for
+            // `index` and `index hint`. Keeping them on the Common buffer lets
+            // SysDa retain every other query feature instead of switching to a
+            // reduced QueryRun implementation.
+            common.Index(indexId);
+
+            if (_query.IndexIsHint)
+            {
+                common.Hint(indexId);
+            }
+        }
 
         sysDaQuery.firstFastHint = _query.FirstFast;
         sysDaQuery.firstOnlyHint = this.getFirstOnlyHint(_query);
@@ -252,7 +291,7 @@ internal final class MXTXppQueryGenerator implements XppInterpreter.Interpreter.
         }
         
         // Join
-        if (_query.Join != null)
+        if (!isExpression && _query.Join != null)
         {
             sysDaQuery.joinClause(this.getJoinKind(_query.Join), this.generateFromQuery(_query.Join.Select, _runtimeContext));
         }
@@ -260,7 +299,7 @@ internal final class MXTXppQueryGenerator implements XppInterpreter.Interpreter.
         // Where
         if (_query.Where != null)
         {
-            MXTXppQueryExpressionGenerator queryExpressionGenerator = new MXTXppQueryExpressionGenerator(_runtimeContext, tablesInQuery);
+            MXTXppQueryExpressionGenerator queryExpressionGenerator = new MXTXppQueryExpressionGenerator(_runtimeContext, tablesInQuery, _isQueryExpression, _buffer);
             sysDaQuery.whereClause(queryExpressionGenerator.visitExpression(_query.Where.Expression));
         }
 

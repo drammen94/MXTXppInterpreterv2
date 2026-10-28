@@ -15,7 +15,7 @@ namespace XppInterpreter.Interpreter.Bytecode
 
             if (value == 0)
             {
-                throw new Exception("Max loop counter has been reached.");
+                throw new global::XppInterpreter.Interpreter.InterpreterLimitExceededException("Max loop counter has been reached.");
             }
 
             // Decrement counter

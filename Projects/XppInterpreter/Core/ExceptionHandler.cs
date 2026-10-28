@@ -77,6 +77,7 @@ namespace XppInterpreter.Core
                         {
                             _transactionCounter--;
                             context.Proxy.Data.TtsAbort();
+                            context.Models.AbortTransaction();
                         }
 
                         // Close any unbalanced scope

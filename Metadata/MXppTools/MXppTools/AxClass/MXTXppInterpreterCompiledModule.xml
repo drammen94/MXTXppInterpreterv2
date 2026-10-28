@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppInterpreterCompiledModule</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Per-AOS compiled module cache result.
+/// </summary>
+internal final class MXTXppInterpreterCompiledModule
+{
+    XppInterpreter.Interpreter.Bytecode.ByteCode byteCode;
+    boolean cacheHit;
+    int64 parseMicroseconds;
+    int64 compileMicroseconds;
+}
+]]></Declaration>
+		<Methods>
+			<Method><Name>parmByteCode</Name><Source><![CDATA[
+    public XppInterpreter.Interpreter.Bytecode.ByteCode parmByteCode(
+        XppInterpreter.Interpreter.Bytecode.ByteCode _value = byteCode)
+    {
+        byteCode = _value;
+        return byteCode;
+    }
+]]></Source></Method>
+			<Method><Name>parmCacheHit</Name><Source><![CDATA[
+    public boolean parmCacheHit(boolean _value = cacheHit) { cacheHit = _value; return cacheHit; }
+]]></Source></Method>
+			<Method><Name>parmParseMicroseconds</Name><Source><![CDATA[
+    public int64 parmParseMicroseconds(int64 _value = parseMicroseconds) { parseMicroseconds = _value; return parseMicroseconds; }
+]]></Source></Method>
+			<Method><Name>parmCompileMicroseconds</Name><Source><![CDATA[
+    public int64 parmCompileMicroseconds(int64 _value = compileMicroseconds) { compileMicroseconds = _value; return compileMicroseconds; }
+]]></Source></Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

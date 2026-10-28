@@ -1,4 +1,6 @@
 ﻿using System.Collections.Generic;
+using System.Net.Http.Headers;
+using System.Threading;
 using XppInterpreter.Lexer;
 using XppInterpreter.Parser.Data;
 
@@ -7,6 +9,8 @@ namespace XppInterpreter.Parser
     public partial class XppParser
     {
         bool isParsingWhereStatement;
+        bool isParsingQueryExpression;
+        string currentQueryExpressionTableName;
 
         bool IsJoinType(Token token)
         {
@@ -42,7 +46,7 @@ namespace XppInterpreter.Parser
                    token == Word.ValidTimeState ||
                    token == Word.CrossCompany ||
                    token == Word.RepeatableRead ||
-                   token == Word.ForUpdate ||
+                   token == Word.NoFetch ||
                    token == Word.GenerateOnly;
         }
 
@@ -51,8 +55,16 @@ namespace XppInterpreter.Parser
             Match(TType.ValidTimeState);
             Match(TType.LeftParenthesis);
             var fromDateExpression = Expression();
-            Match(TType.Comma);
-            var toDateExpression = Expression();
+
+            // validTimeState(asOfDate) selects rows valid at a single date
+            Expression toDateExpression = fromDateExpression;
+
+            if (currentToken.TokenType == TType.Comma)
+            {
+                Match(TType.Comma);
+                toDateExpression = Expression();
+            }
+
             Match(TType.RightParenthesis);
 
             return new ValidTimeState(fromDateExpression, toDateExpression);
@@ -64,9 +76,9 @@ namespace XppInterpreter.Parser
 
             Match(TType.CrossCompany);
 
-            if (currentToken.TokenType == TType.DoubleDot)
+            if (currentToken.TokenType == TType.Colon || currentToken.TokenType == TType.DoubleDot)
             {
-                Match(TType.DoubleDot);
+                Match(currentToken.TokenType);
                 container = Expression();
             }
 
@@ -76,7 +88,11 @@ namespace XppInterpreter.Parser
         List<Field> GroupBy()
         {
             Match(TType.Group);
-            Match(TType.By);
+
+            if (currentToken.TokenType == TType.By)
+            {
+                Match(TType.By);
+            }
 
             List<Field> ret = new List<Field>();
 
@@ -98,8 +114,22 @@ namespace XppInterpreter.Parser
                 {
                     tableNameVar = identifierName;
 
+                    if (isParsingQueryExpression && tableNameVar.Lexeme !=  currentQueryExpressionTableName)
+                    {
+                        HandleParseError("Invalid table.");
+                    }
+
                     Match(TType.Dot);
-                    HandleAutocompletion(new Variable(tableNameVar, null, false, null));
+
+                    if (isParsingQueryExpression)
+                    {
+                        HandleAutocompletionForType(currentQueryExpressionTableName);
+                    }
+                    else
+                    {
+                        HandleAutocompletion(new Variable(tableNameVar, null, false, null));
+                    }
+
                     fieldNameVar = (Word)Match(TType.Id).Token;
                 }
                 else
@@ -109,6 +139,12 @@ namespace XppInterpreter.Parser
 
                 ret.Add(new Field(tableNameVar?.Lexeme, fieldNameVar?.Lexeme));
 
+                // X++ accepts asc/desc in FieldOrder for both order by and group by.
+                if (currentToken.TokenType == TType.Asc || currentToken.TokenType == TType.Desc)
+                {
+                    Match(currentToken.TokenType);
+                }
+
             } while (currentToken.TokenType == TType.Comma);
 
             return ret;
@@ -117,7 +153,11 @@ namespace XppInterpreter.Parser
         List<OrderByField> OrderBy()
         {
             Match(TType.Order);
-            Match(TType.By);
+
+            if (currentToken.TokenType == TType.By)
+            {
+                Match(TType.By);
+            }
 
             List<OrderByField> ret = new List<OrderByField>();
 
@@ -138,8 +178,22 @@ namespace XppInterpreter.Parser
                 {
                     tableNameVar = identifierName;
 
+                    if (isParsingQueryExpression && tableNameVar.Lexeme != currentQueryExpressionTableName)
+                    {
+                        HandleParseError("Invalid table.");
+                    }
+
                     Match(TType.Dot);
-                    HandleAutocompletion(new Variable(identifierName, null, false, null));
+
+                    if (isParsingQueryExpression)
+                    {
+                        HandleAutocompletionForType(currentQueryExpressionTableName);
+                    }
+                    else
+                    { 
+                        HandleAutocompletion(new Variable(identifierName, null, false, null));
+                    }
+
                     fieldNameVar = (Word)Match(TType.Id).Token;
                 }
                 else
@@ -234,10 +288,20 @@ namespace XppInterpreter.Parser
             {
                 if (currentToken.TokenType == TType.ValidTimeState)
                 {
+                    if (collection.ValidTimeState != null)
+                    {
+                        HandleParseError("validTimeState was specified more than once.", stop: false);
+                    }
+
                     collection.ValidTimeState = ValidTimeState();
                 }
                 else if (currentToken.TokenType == TType.CrossCompany)
                 {
+                    if (collection.CrossCompany != null)
+                    {
+                        HandleParseError("crossCompany was specified more than once.", stop: false);
+                    }
+
                     collection.CrossCompany = CrossCompany();
                 }
                 else
@@ -245,6 +309,24 @@ namespace XppInterpreter.Parser
                     collection.SetFlag(currentToken.TokenType);
                     Match(currentToken.TokenType);
                 }
+            }
+
+            int firstOptionCount = (collection.FirstOnly ? 1 : 0) + (collection.FirstOnly10 ? 1 : 0) +
+                (collection.FirstOnly100 ? 1 : 0) + (collection.FirstOnly1000 ? 1 : 0);
+
+            if (firstOptionCount > 1)
+            {
+                HandleParseError("Only one firstOnly option can be specified on a select statement.", stop: false);
+            }
+
+            if (collection.ForceLiterals && collection.ForcePlaceHolders)
+            {
+                HandleParseError("forceLiterals and forcePlaceholders are mutually exclusive.", stop: false);
+            }
+
+            if (collection.OptimisticLock && collection.PessimisticLock)
+            {
+                HandleParseError("optimisticLock and pessimisticLock are mutually exclusive.", stop: false);
             }
 
             return collection;
@@ -258,6 +340,30 @@ namespace XppInterpreter.Parser
             Query query = Query();
 
             return new Select(query, SourceCodeBinding(start, lastScanResult));
+        }
+
+        internal SelectExpression SelectExpression()
+        {
+            var start = currentScanResult;
+
+            isParsingQueryExpression = true;
+
+            Match(TType.LeftParenthesis);
+            var selectResult = Match(TType.Select);
+
+            Query query = Query();
+
+            isParsingQueryExpression = false;
+
+            Match(TType.RightParenthesis);
+            Match(TType.Dot);
+
+            HandleAutocompletionForType(query.TableVariableName);
+
+            var identifierResult = Match(TType.Id);
+            var identifierName = (Word)identifierResult.Token;
+
+            return new SelectExpression(selectResult.Token, query, identifierName.Lexeme, SourceCodeBinding(start, lastScanResult));
         }
 
         internal Join OuterJoin()
@@ -445,9 +551,18 @@ namespace XppInterpreter.Parser
             return ret;
         }
 
-        string Index(Word tableNameVar)
+        string Index(Word tableNameVar, out bool isHint)
         {
             Match(TType.Index);
+            isHint = false;
+
+            // index hint <IndexName>
+            if (currentToken is Word hintWord && string.Equals(hintWord.Lexeme, "hint", System.StringComparison.OrdinalIgnoreCase))
+            {
+                Match(TType.Id);
+                isHint = true;
+            }
+
             HandleAutocompletion(new Variable(tableNameVar, null, false, null));
             return (Match(TType.Id).Token as Word).Lexeme;
         }
@@ -468,12 +583,22 @@ namespace XppInterpreter.Parser
 
             var tableResult = Match(TType.Id);
             var tableVarName = (Word)tableResult.Token;
-            HandleMetadataInterruption(tableResult.Line, tableResult.Start, tableResult.End, tableResult.Token, Metadata.TokenMetadataType.Variable);
+
+            if (!isParsingQueryExpression)
+            { 
+                HandleMetadataInterruption(tableResult.Line, tableResult.Start, tableResult.End, tableResult.Token, Metadata.TokenMetadataType.Variable);
+            }
+            else
+            {
+                currentQueryExpressionTableName = tableVarName.Lexeme;
+            }
+
             string index = null;
+            bool indexIsHint = false;
 
             if (currentToken.TokenType == TType.Index)
             {
-                index = Index(tableVarName);
+                index = Index(tableVarName, out indexIsHint);
             }
 
             // Iterate two time, since group by and order by can be in any order
@@ -515,6 +640,11 @@ namespace XppInterpreter.Parser
             Join join = null;
             if (IsJoinType(currentToken))
             {
+                if (isParsingQueryExpression)
+                {
+                    HandleParseError("Data lookup statements cannot contain joins");
+                }
+
                 switch (currentToken.TokenType)
                 {
                     case TType.Join: join = Join(JoinType.Regular); break;
@@ -544,13 +674,35 @@ namespace XppInterpreter.Parser
                 ForceLiterals = modifiersCollection.ForceLiterals,
                 ForceNetsedLoops = modifiersCollection.ForceNestedLoops,
                 ForceSelectOrder = modifiersCollection.ForceSelectOrder,
-                SelectionFields = selectionFields,
+                SelectionFields = selectionFields.Count == 0 ? null : selectionFields,
                 OrderFields = orderBy,
                 GroupFields = groupBy,
                 Index = index,
+                IndexIsHint = indexIsHint,
                 Where = where,
                 Join = join
             };
+        }
+
+        public TableField TableField()
+        {
+            var start = Match(TType.Id);
+
+            Match(TType.Dot);
+
+            string tableName = (start.Token as Word).Lexeme;
+
+            HandleAutocompletionForType(tableName);
+
+            var end = Match(TType.Id).Token as Word;
+
+            return new TableField(start.Token, tableName, end.Lexeme, SourceCodeBinding(start, lastScanResult));
+        }
+
+        public bool IsIdentifierMatchQueryExpressionTable(string identifier)
+        {
+            return isParsingQueryExpression && isParsingWhereStatement &&
+                identifier.Equals(currentQueryExpressionTableName, System.StringComparison.InvariantCultureIgnoreCase);
         }
     }
 }

@@ -17,7 +17,9 @@ namespace XppInterpreter.Interpreter
         void VisitThrow(Throw @throw);
         void VisitSelect(Select select);
         void VisitNext(Next next);
+        void VisitFlush(Flush flush);
         void VisitWhileSelect(WhileSelect whileSelect);
+        void VisitUnchecked(Unchecked @unchecked);
         void VisitChangeCompany(ChangeCompany changeCompany);
         void VisitTtsCommit(TtsCommit ttsCommit);
         void VisitContainerAssignment(ContainerAssignment containerAssignment);
@@ -35,10 +37,11 @@ namespace XppInterpreter.Interpreter
         void VisitIf(If @if);
         void VisitWhile(While @while);
         void VisitFunctionCall(FunctionCall functionCall);
+        void VisitEventHandlerSubscription(EventHandlerSubscription subscription);
         void VisitVariableDeclarations(VariableDeclarations variableDeclaration);
         void VisitTry(Try @try);
         void VisitRetry(Retry retry);
-        void VisitClassDeclaration(ClassDeclaration classDeclaration);
         void VisitUsing(Using @using);
+        void VisitClassDeclaration(ClassDeclaration classDeclaration);
     }
 }

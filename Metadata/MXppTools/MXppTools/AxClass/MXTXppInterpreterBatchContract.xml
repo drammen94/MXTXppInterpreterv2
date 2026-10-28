@@ -8,6 +8,8 @@ internal final class MXTXppInterpreterBatchContract
 {
     private MXTSourceCode sourceCode;
     private int maxLoopIterations;
+    private int maxInstructions;
+    private int maxExecutionMilliseconds;
     private NoYesId emitGlobalTtsAbort;
 
 }
@@ -36,6 +38,32 @@ internal final class MXTXppInterpreterBatchContract
     {
         maxLoopIterations = _maxLoopIterations;
         return maxLoopIterations;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmMaxInstructions</Name>
+				<Source><![CDATA[
+    [DataMember,
+     SysOperationLabel(literalStr("Maximum interpreter instructions"))]
+    public int parmMaxInstructions(int _maxInstructions = maxInstructions)
+    {
+        maxInstructions = _maxInstructions;
+        return maxInstructions;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmMaxExecutionMilliseconds</Name>
+				<Source><![CDATA[
+    [DataMember,
+     SysOperationLabel(literalStr("Maximum execution time (milliseconds)"))]
+    public int parmMaxExecutionMilliseconds(int _maxExecutionMilliseconds = maxExecutionMilliseconds)
+    {
+        maxExecutionMilliseconds = _maxExecutionMilliseconds;
+        return maxExecutionMilliseconds;
     }
 
 ]]></Source>

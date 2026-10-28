@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppInterpreterModuleRequest</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Request used to stage, activate, inspect, execute, and roll back an interpreted module.
+/// A dependency may be expressed as Name (pin the active version) or Name@Version.
+/// </summary>
+[DataContract]
+public final class MXTXppInterpreterModuleRequest
+{
+    str moduleName;
+    str sourceCode;
+    List dependencies = new List(Types::String);
+    int version;
+    boolean activate;
+    str requestId;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>parmModuleName</Name>
+				<Source><![CDATA[
+    [DataMember("ModuleName")]
+    public str parmModuleName(str _moduleName = moduleName)
+    {
+        moduleName = _moduleName;
+        return moduleName;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmSourceCode</Name>
+				<Source><![CDATA[
+    [DataMember("SourceCode")]
+    public str parmSourceCode(str _sourceCode = sourceCode)
+    {
+        sourceCode = _sourceCode;
+        return sourceCode;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmDependencies</Name>
+				<Source><![CDATA[
+    [DataMember("Dependencies"),
+     DataCollection(Types::String)]
+    public List parmDependencies(List _dependencies = dependencies)
+    {
+        dependencies = _dependencies;
+        return dependencies;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmVersion</Name>
+				<Source><![CDATA[
+    [DataMember("Version")]
+    public int parmVersion(int _version = version)
+    {
+        version = _version;
+        return version;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmActivate</Name>
+				<Source><![CDATA[
+    [DataMember("Activate")]
+    public boolean parmActivate(boolean _activate = activate)
+    {
+        activate = _activate;
+        return activate;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmRequestId</Name>
+				<Source><![CDATA[
+    [DataMember("RequestId")]
+    public str parmRequestId(str _requestId = requestId)
+    {
+        requestId = _requestId;
+        return requestId;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

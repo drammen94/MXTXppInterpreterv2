@@ -21,7 +21,7 @@ namespace XppInterpreter.Lexer
         public static readonly Word PlusAssignment = new Word("+=", TType.PlusAssignment);
         public static readonly Word MinusAssignment = new Word("-=", TType.MinusAssignment);
         public static readonly Word Increment = new Word("++", TType.Increment);
-        public static readonly Word Decrement = new Word("--", TType.GreaterOrEqual);
+        public static readonly Word Decrement = new Word("--", TType.Decrement);
         public static readonly Word LeftShift = new Word("<<", TType.LeftShift);
         public static readonly Word RightShift = new Word(">>", TType.RightShift);
         #endregion
@@ -52,7 +52,30 @@ namespace XppInterpreter.Lexer
         public static readonly Word Is = new Word("is", TType.Is);
         public static readonly Word As = new Word("as", TType.As);
         public static readonly Word Using = new Word("using", TType.Using);
+        public static readonly Word Unchecked = new Word("unchecked", TType.Unchecked);
+        public static readonly Word Flush = new Word("flush", TType.Flush);
+        #endregion
+
+        #region Class declaration tokens
         public static readonly Word Class = new Word("class", TType.Class);
+        public static readonly Word Interface = new Word("interface", TType.Interface);
+        public static readonly Word Extends = new Word("extends", TType.Extends);
+        public static readonly Word Implements = new Word("implements", TType.Implements);
+        public static readonly Word Public = new Word("public", TType.Public);
+        public static readonly Word Protected = new Word("protected", TType.Protected);
+        public static readonly Word Private = new Word("private", TType.Private);
+        public static readonly Word Internal = new Word("internal", TType.Internal);
+        public static readonly Word Static = new Word("static", TType.Static);
+        public static readonly Word Final = new Word("final", TType.Final);
+        public static readonly Word Abstract = new Word("abstract", TType.Abstract);
+        public static readonly Word Const = new Word("const", TType.Const);
+        public static readonly Word ReadOnly = new Word("readonly", TType.ReadOnly);
+        public static readonly Word Delegate = new Word("delegate", TType.Delegate);
+        public static readonly Word ByRef = new Word("byref", TType.ByRef);
+        public static readonly Word Client = new Word("client", TType.Client);
+        public static readonly Word Server = new Word("server", TType.Server);
+        public static readonly Word Display = new Word("display", TType.Display);
+        public static readonly Word Edit = new Word("edit", TType.Edit);
         #endregion
 
         #region Data and query tokens
@@ -109,6 +132,7 @@ namespace XppInterpreter.Lexer
         #region Function tokens
         public static readonly Word Void = new Word("void", TType.Void);
         public static readonly Word Return = new Word("return", TType.Return);
+        public static readonly Word EventHandler = new Word("eventhandler", TType.EventHandler);
         #endregion
 
         public Word(string lexeme, TType tokenType) : base(tokenType)

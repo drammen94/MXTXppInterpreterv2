@@ -15,6 +15,8 @@
         public static readonly Type TimeOfDay = new Type("timeofday", TType.TypeTimeOfDay);
         public static readonly Type Str = new Type("str", TType.TypeStr);
         public static readonly Type Var = new Type("var", TType.Var);
+        public static readonly Type Boolean = new Type("boolean", TType.TypeBoolean);
+        public static readonly Type Guid = new Type("guid", TType.TypeGuid);
 
         public Type(string lexeme, TType tokenType) : base(lexeme, tokenType)
         {

@@ -76,9 +76,41 @@ internal final class MXTXppInterpreterExecutor
     /// <param name = "_parameters">A record of <c>MXTXppInterpreterParameters</c></param>
     public static void executeScript(MXTXppInterpreterScript _script, MXTXppInterpreterParameters _parameters)
     {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
         var dependencies = MXTXppScriptDependencyManager::parseDependencies(_script.RecId);
 
         MXTXppInterpreterExecutor::execute(_script.SourceCode, null, _parameters, dependencies);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createLexer</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Creates a lexer with D365FO macro dictionary resolution enabled.
+    /// </summary>
+    public static XppInterpreter.Lexer.XppLexer createLexer(str _sourceCode)
+    {
+        XppInterpreter.Lexer.MacroPreprocessor preprocessor = new XppInterpreter.Lexer.MacroPreprocessor();
+
+        try
+        {
+            str packagesBinDirectory = Microsoft.Dynamics.Ax.Xpp.MetadataSupport::PackagesBinDirectory;
+            System.IO.DirectoryInfo packagesDirectory = System.IO.Directory::GetParent(packagesBinDirectory);
+
+            if (packagesDirectory != null)
+            {
+                preprocessor.UseFileSystemMacroLibraries(packagesDirectory.FullName);
+            }
+        }
+        catch (Exception::CLRError)
+        {
+            // The lexer reports a clear #macrolib resolution error when package
+            // metadata isn't available in the current deployment topology.
+        }
+
+        return new XppInterpreter.Lexer.XppLexer(_sourceCode, preprocessor);
     }
 
 ]]></Source>
@@ -93,10 +125,72 @@ internal final class MXTXppInterpreterExecutor
     /// <returns>Program AST</returns>
     public static XppInterpreter.Parser.ParseResult parse(str _sourceCode)
     {
-        XppInterpreter.Lexer.XppLexer lexer = new XppInterpreter.Lexer.XppLexer(_sourceCode);
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+        XppInterpreter.Lexer.XppLexer lexer = MXTXppInterpreterExecutor::createLexer(_sourceCode);
         XppInterpreter.Parser.XppParser parser = new XppInterpreter.Parser.XppParser(lexer, proxy);
         
         return parser.Parse();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>executeExpressionWithContext</Name>
+				<Source><![CDATA[
+    /// <summary>
+    ///     Executes the given source code expression with the specified runtime context
+    /// </summary>
+    /// <param name = "_sourceCode">Expression code</param>
+    /// <param name = "_context">Runtime context to give to the parser and interpreter</param>
+    /// <returns></returns>
+    public static anytype executeExpressionWithContext(str _sourceCode, XppInterpreter.Interpreter.RuntimeContext _context)
+    {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+        XppInterpreter.Lexer.XppLexer lexer = MXTXppInterpreterExecutor::createLexer(_sourceCode);
+        XppInterpreter.Parser.ParseContext parseContext = XppInterpreter.Parser.ParseContext::FromRuntimeContext(_context);
+        var result = XppInterpreter.Parser.XppParser::ParseExpressionWithContext(lexer, proxy, parseContext);
+
+        if (result.IsCorrect)
+        {
+            XppInterpreter.Parser.Expression expression = result.AST as XppInterpreter.Parser.Expression;
+
+            // Generate bytecode
+            XppInterpreter.Interpreter.Bytecode.ByteCodeGenerator generator = new XppInterpreter.Interpreter.Bytecode.ByteCodeGenerator();
+
+            expression.Accept(generator);
+
+            XppInterpreter.Interpreter.Bytecode.ByteCode byteCode = generator.GeneratedByteCode;
+            MXTXppInterpreterParameters parameters = MXTXppInterpreterParameters::find();
+            XppInterpreter.Interpreter.XppInterpreterOptions options = new XppInterpreter.Interpreter.XppInterpreterOptions();
+            options.MaxLoopIterations = parameters.MaxLoopIteratations > 0 ? parameters.MaxLoopIteratations : 100000;
+            options.MaxInstructions = parameters.MaxInstructions > 0 ? parameters.MaxInstructions : 1000000;
+            options.MaxExecutionMilliseconds = parameters.MaxExecutionMilliseconds > 0 ? parameters.MaxExecutionMilliseconds : 300000;
+            XppInterpreter.Interpreter.XppInterpreter interpreter = new XppInterpreter.Interpreter.XppInterpreter(proxy, options);
+
+            XppInterpreter.Interpreter.InterpreterResult interpreterResult = interpreter.Interpret(byteCode, _context, false);
+
+            if (_context.Stack.Count == 0)
+            {
+                return "<executed>";
+            }
+
+            return _context.Stack.Pop();
+        }
+        else
+        {
+            MXTXppInterpreterCodeEditorParseExceptionCollection collection = new MXTXppInterpreterCodeEditorParseExceptionCollection();
+
+            System.Collections.IEnumerator enumerator = result.Errors.GetEnumerator();
+
+            while (enumerator.MoveNext())
+            {
+                XppInterpreter.Parser.ParseError err = enumerator.Current;
+
+                throw error(err.Message);
+            }
+
+            throw error("An error occurred while evaluating the expression.");
+        }
     }
 
 ]]></Source>
@@ -117,12 +211,17 @@ internal final class MXTXppInterpreterExecutor
         MXTXppInterpreterParameters                _parameters  = MXTXppInterpreterParameters::find(),
         XppInterpreter.Interpreter.XppInterpreterDependencyCollection _dependencies = null)
     {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+
         // Setup options
         XppInterpreter.Interpreter.XppInterpreterOptions options = new XppInterpreter.Interpreter.XppInterpreterOptions();
         options.EmitGlobalTtsAbort = _parameters.EmitGlobalTtsAbort;
-        options.MaxLoopIterations = _parameters.MaxLoopIteratations;
+        options.MaxLoopIterations = _parameters.MaxLoopIteratations > 0 ? _parameters.MaxLoopIteratations : 100000;
+        options.MaxInstructions = _parameters.MaxInstructions > 0 ? _parameters.MaxInstructions : 1000000;
+        options.MaxExecutionMilliseconds = _parameters.MaxExecutionMilliseconds > 0 ? _parameters.MaxExecutionMilliseconds : 300000;
 
-        XppInterpreter.Interpreter.XppInterpreter interpreter = new XppInterpreter.Interpreter.XppInterpreter(proxy);
+        XppInterpreter.Interpreter.XppInterpreter interpreter = new XppInterpreter.Interpreter.XppInterpreter(proxy, options);
+        interpreter.Debugger = _debugger;
 
         interpreter.Interpret(_program, _dependencies);
     }
@@ -145,6 +244,8 @@ internal final class MXTXppInterpreterExecutor
         MXTXppInterpreterParameters                 _parameters  = MXTXppInterpreterParameters::find(),
         XppInterpreter.Interpreter.XppInterpreterDependencyCollection _dependencies = null)
     {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+
         // Create lexer and parser
         XppInterpreter.Parser.ParseResult parseResult = MXTXppInterpreterExecutor::parse(_sourceCode);
 
@@ -153,6 +254,14 @@ internal final class MXTXppInterpreterExecutor
             MXTXppInterpreterScriptExecutionLog::startLog(_sourceCode, _parameters.EmitGlobalTtsAbort);
 
             MXTXppInterpreterExecutor::executeProgram(parseResult.AST as XppInterpreter.Parser.Program, _debugger, _parameters, _dependencies);
+        }
+
+        System.Collections.IEnumerator errorEnumerator = parseResult.Errors.GetEnumerator();
+
+        if (errorEnumerator.MoveNext())
+        {
+            XppInterpreter.Parser.ParseError parseError = errorEnumerator.Current;
+            throw error(parseError.Message);
         }
 	}
 
@@ -167,10 +276,311 @@ internal final class MXTXppInterpreterExecutor
     /// <param name = "_script">A record of <c>MXTXppInterpreterScript</c></param>
     public static void executeScriptInBatch(MXTXppInterpreterScript _script)
     {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
         Args args = new Args();
         args.record(_script);
 
         MXTXppInterpreterBatchController::main(args);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>elapsedMicroseconds</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Converts Stopwatch ticks to microseconds without relying on wall-clock time.
+    /// </summary>
+    public static int64 elapsedMicroseconds(System.Diagnostics.Stopwatch _stopwatch)
+    {
+        return (_stopwatch.ElapsedTicks * 1000000) div System.Diagnostics.Stopwatch::Frequency;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>compileModule</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Compiles an already-validated module plus its pinned dependency programs.
+    /// </summary>
+    public static XppInterpreter.Interpreter.Bytecode.ByteCode compileModule(
+        XppInterpreter.Parser.Program _program,
+        XppInterpreter.Interpreter.XppInterpreterDependencyCollection _dependencies)
+    {
+        XppInterpreter.Interpreter.XppInterpreter interpreter =
+            new XppInterpreter.Interpreter.XppInterpreter(
+                proxy,
+                MXTXppInterpreterExecutor::newFastExecutionOptions());
+        return interpreter.Compile(_program, _dependencies);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>executeCompiledFast</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Executes resident bytecode in an interpreter-owned rollback scope.
+    /// Used by the versioned module registry after a cache hit or compilation.
+    /// </summary>
+    public static void executeCompiledFast(
+        XppInterpreter.Interpreter.Bytecode.ByteCode _byteCode,
+        MXTXppInterpreterExecutionResponse _response)
+    {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+        if (!_byteCode || !_response)
+        {
+            throw error('Compiled bytecode and an execution response are required.');
+        }
+        if (appl.ttsLevel() != 0)
+        {
+            throw error('Compiled module execution requires TTS level zero.');
+        }
+
+        int firstInfologLine = infologLine() + 1;
+        boolean transactionStarted;
+        try
+        {
+            XppInterpreter.Interpreter.XppInterpreter interpreter =
+                new XppInterpreter.Interpreter.XppInterpreter(
+                    proxy,
+                    MXTXppInterpreterExecutor::newFastExecutionOptions());
+
+            ttsbegin;
+            transactionStarted = true;
+            System.Diagnostics.Stopwatch executeWatch = System.Diagnostics.Stopwatch::StartNew();
+            interpreter.Interpret(
+                _byteCode,
+                null,
+                true,
+                XppInterpreter.Interpreter.Debug.DebugAction::None);
+            executeWatch.Stop();
+            _response.parmExecuteMicroseconds(
+                MXTXppInterpreterExecutor::elapsedMicroseconds(executeWatch));
+
+            ttsabort;
+            transactionStarted = false;
+            _response.parmRolledBack(true);
+            _response.parmSuccess(true);
+        }
+        catch (Exception::CLRError)
+        {
+            if (transactionStarted || appl.ttsLevel() > 0)
+            {
+                ttsabort;
+                transactionStarted = false;
+                _response.parmRolledBack(true);
+            }
+            System.Exception clrException = CLRInterop::getLastException();
+            _response.parmError(clrException ? clrException.ToString() : 'The compiled module raised a CLR error.');
+        }
+        catch
+        {
+            if (transactionStarted || appl.ttsLevel() > 0)
+            {
+                ttsabort;
+                transactionStarted = false;
+                _response.parmRolledBack(true);
+            }
+            str errorMessage;
+            if (infologLine() >= firstInfologLine)
+            {
+                errorMessage = MXTXppInterpreterExecutor::fastExecutionInfologText(firstInfologLine);
+            }
+            _response.parmError(errorMessage ? errorMessage : 'The compiled module raised an X++ error.');
+        }
+
+        if (transactionStarted || appl.ttsLevel() > 0)
+        {
+            ttsabort;
+            _response.parmRolledBack(true);
+        }
+        if (infologLine() >= firstInfologLine)
+        {
+            _response.parmOutput(MXTXppInterpreterExecutor::fastExecutionInfologText(firstInfologLine));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>newFastExecutionOptions</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Builds bounded execution options without reading configuration tables. The fast
+    /// endpoint must remain usable before database synchronization and must not pay for
+    /// a SQL round trip on every edit. Transaction handling is performed by executeFast.
+    /// </summary>
+    private static XppInterpreter.Interpreter.XppInterpreterOptions newFastExecutionOptions()
+    {
+        XppInterpreter.Interpreter.XppInterpreterOptions options = new XppInterpreter.Interpreter.XppInterpreterOptions();
+
+        options.EmitGlobalTtsAbort = false;
+        options.MaxLoopIterations = 100000;
+        options.MaxInstructions = 1000000;
+        options.MaxExecutionMilliseconds = 30000;
+
+        return options;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>fastExecutionInfologText</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Returns only messages produced by the current fast execution request.
+    /// </summary>
+    private static str fastExecutionInfologText(int _firstLine)
+    {
+        str result;
+        for (int line = _firstLine; line <= infologLine(); line++)
+        {
+            result += (result ? "\n" : "") + infolog.text(line);
+        }
+        return result;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>executeFast</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Executes source directly in the resident interpreter and always rolls database
+    /// work back. This is the low-latency edit/run path used by the custom service.
+    /// </summary>
+    public static MXTXppInterpreterExecutionResponse executeFast(MXTXppInterpreterExecutionRequest _request)
+    {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+
+        if (!_request)
+        {
+            throw error("An interpreter execution request is required.");
+        }
+
+        str sourceCode = _request.parmSourceCode();
+        if (!sourceCode)
+        {
+            throw error("SourceCode is required.");
+        }
+
+        if (strLen(sourceCode) > 1000000)
+        {
+            throw error("SourceCode exceeds the 1,000,000 character immediate-execution limit.");
+        }
+
+        if (appl.ttsLevel() != 0)
+        {
+            throw error("Immediate interpreter execution requires TTS level zero.");
+        }
+
+        MXTXppInterpreterExecutionResponse response = new MXTXppInterpreterExecutionResponse();
+        str requestId = _request.parmRequestId();
+        if (!requestId)
+        {
+            requestId = guid2Str(newGuid());
+        }
+        response.parmRequestId(requestId);
+
+        int firstInfologLine = infologLine() + 1;
+        boolean transactionStarted;
+        System.Diagnostics.Stopwatch totalWatch = System.Diagnostics.Stopwatch::StartNew();
+
+        try
+        {
+            System.Diagnostics.Stopwatch parseWatch = System.Diagnostics.Stopwatch::StartNew();
+            XppInterpreter.Parser.ParseResult parseResult = MXTXppInterpreterExecutor::parse(sourceCode);
+            parseWatch.Stop();
+            response.parmParseMicroseconds(MXTXppInterpreterExecutor::elapsedMicroseconds(parseWatch));
+
+            if (!parseResult.IsCorrect)
+            {
+                str parseErrors;
+                System.Collections.IEnumerator errorEnumerator = parseResult.Errors.GetEnumerator();
+                while (errorEnumerator.MoveNext())
+                {
+                    XppInterpreter.Parser.ParseError parseError = errorEnumerator.Current;
+                    parseErrors += (parseErrors ? "\n" : "") + parseError.Message;
+                }
+
+                response.parmError(parseErrors ? parseErrors : "The source did not parse correctly.");
+            }
+            else
+            {
+                XppInterpreter.Interpreter.XppInterpreterOptions options = MXTXppInterpreterExecutor::newFastExecutionOptions();
+                XppInterpreter.Interpreter.XppInterpreter interpreter = new XppInterpreter.Interpreter.XppInterpreter(proxy, options);
+
+                System.Diagnostics.Stopwatch compileWatch = System.Diagnostics.Stopwatch::StartNew();
+                XppInterpreter.Interpreter.Bytecode.ByteCode byteCode = interpreter.Compile(
+                    parseResult.AST as XppInterpreter.Parser.Program,
+                    null);
+                compileWatch.Stop();
+                response.parmCompileMicroseconds(MXTXppInterpreterExecutor::elapsedMicroseconds(compileWatch));
+                response.parmInstructionCount(byteCode.Instructions.Count);
+
+                ttsbegin;
+                transactionStarted = true;
+
+                System.Diagnostics.Stopwatch executeWatch = System.Diagnostics.Stopwatch::StartNew();
+                interpreter.Interpret(
+                    byteCode,
+                    null,
+                    true,
+                    XppInterpreter.Interpreter.Debug.DebugAction::None);
+                executeWatch.Stop();
+                response.parmExecuteMicroseconds(MXTXppInterpreterExecutor::elapsedMicroseconds(executeWatch));
+
+                ttsabort;
+                transactionStarted = false;
+                response.parmRolledBack(true);
+                response.parmSuccess(true);
+            }
+        }
+        catch (Exception::CLRError)
+        {
+            if (transactionStarted || appl.ttsLevel() > 0)
+            {
+                ttsabort;
+                transactionStarted = false;
+                response.parmRolledBack(true);
+            }
+
+            System.Exception clrException = CLRInterop::getLastException();
+            response.parmError(clrException ? clrException.ToString() : "The interpreter raised a CLR error.");
+        }
+        catch
+        {
+            if (transactionStarted || appl.ttsLevel() > 0)
+            {
+                ttsabort;
+                transactionStarted = false;
+                response.parmRolledBack(true);
+            }
+
+            str errorText;
+            if (infologLine() >= firstInfologLine)
+            {
+                errorText = MXTXppInterpreterExecutor::fastExecutionInfologText(firstInfologLine);
+            }
+            response.parmError(errorText ? errorText : "The interpreter raised an X++ error.");
+        }
+
+        if (transactionStarted || appl.ttsLevel() > 0)
+        {
+            ttsabort;
+            response.parmRolledBack(true);
+        }
+
+        if (infologLine() >= firstInfologLine)
+        {
+            response.parmOutput(MXTXppInterpreterExecutor::fastExecutionInfologText(firstInfologLine));
+        }
+
+        totalWatch.Stop();
+        response.parmTotalMicroseconds(MXTXppInterpreterExecutor::elapsedMicroseconds(totalWatch));
+        return response;
     }
 
 ]]></Source>

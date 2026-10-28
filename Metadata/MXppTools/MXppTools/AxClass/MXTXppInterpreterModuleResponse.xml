@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppInterpreterModuleResponse</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Durable interpreted-module operation result.
+/// </summary>
+[DataContract]
+public final class MXTXppInterpreterModuleResponse
+{
+    boolean success;
+    str error;
+    str moduleName;
+    int version;
+    int activeVersion;
+    int previousActiveVersion;
+    str state;
+    str sourceCode;
+    str sourceHash;
+    List dependencies = new List(Types::String);
+    List versions = new List(Types::String);
+    str deployedBy;
+    str deployedAt;
+    int instructionCount;
+    boolean cacheHit;
+    int64 compileMicroseconds;
+}
+]]></Declaration>
+		<Methods>
+			<Method><Name>parmSuccess</Name><Source><![CDATA[
+    [DataMember("Success")]
+    public boolean parmSuccess(boolean _value = success) { success = _value; return success; }
+]]></Source></Method>
+			<Method><Name>parmError</Name><Source><![CDATA[
+    [DataMember("Error")]
+    public str parmError(str _value = error) { error = _value; return error; }
+]]></Source></Method>
+			<Method><Name>parmModuleName</Name><Source><![CDATA[
+    [DataMember("ModuleName")]
+    public str parmModuleName(str _value = moduleName) { moduleName = _value; return moduleName; }
+]]></Source></Method>
+			<Method><Name>parmVersion</Name><Source><![CDATA[
+    [DataMember("Version")]
+    public int parmVersion(int _value = version) { version = _value; return version; }
+]]></Source></Method>
+			<Method><Name>parmActiveVersion</Name><Source><![CDATA[
+    [DataMember("ActiveVersion")]
+    public int parmActiveVersion(int _value = activeVersion) { activeVersion = _value; return activeVersion; }
+]]></Source></Method>
+			<Method><Name>parmPreviousActiveVersion</Name><Source><![CDATA[
+    [DataMember("PreviousActiveVersion")]
+    public int parmPreviousActiveVersion(int _value = previousActiveVersion) { previousActiveVersion = _value; return previousActiveVersion; }
+]]></Source></Method>
+			<Method><Name>parmState</Name><Source><![CDATA[
+    [DataMember("State")]
+    public str parmState(str _value = state) { state = _value; return state; }
+]]></Source></Method>
+			<Method><Name>parmSourceCode</Name><Source><![CDATA[
+    [DataMember("SourceCode")]
+    public str parmSourceCode(str _value = sourceCode) { sourceCode = _value; return sourceCode; }
+]]></Source></Method>
+			<Method><Name>parmSourceHash</Name><Source><![CDATA[
+    [DataMember("SourceHash")]
+    public str parmSourceHash(str _value = sourceHash) { sourceHash = _value; return sourceHash; }
+]]></Source></Method>
+			<Method><Name>parmDependencies</Name><Source><![CDATA[
+    [DataMember("Dependencies"), DataCollection(Types::String)]
+    public List parmDependencies(List _value = dependencies) { dependencies = _value; return dependencies; }
+]]></Source></Method>
+			<Method><Name>parmVersions</Name><Source><![CDATA[
+    [DataMember("Versions"), DataCollection(Types::String)]
+    public List parmVersions(List _value = versions) { versions = _value; return versions; }
+]]></Source></Method>
+			<Method><Name>parmDeployedBy</Name><Source><![CDATA[
+    [DataMember("DeployedBy")]
+    public str parmDeployedBy(str _value = deployedBy) { deployedBy = _value; return deployedBy; }
+]]></Source></Method>
+			<Method><Name>parmDeployedAt</Name><Source><![CDATA[
+    [DataMember("DeployedAt")]
+    public str parmDeployedAt(str _value = deployedAt) { deployedAt = _value; return deployedAt; }
+]]></Source></Method>
+			<Method><Name>parmInstructionCount</Name><Source><![CDATA[
+    [DataMember("InstructionCount")]
+    public int parmInstructionCount(int _value = instructionCount) { instructionCount = _value; return instructionCount; }
+]]></Source></Method>
+			<Method><Name>parmCacheHit</Name><Source><![CDATA[
+    [DataMember("CacheHit")]
+    public boolean parmCacheHit(boolean _value = cacheHit) { cacheHit = _value; return cacheHit; }
+]]></Source></Method>
+			<Method><Name>parmCompileMicroseconds</Name><Source><![CDATA[
+    [DataMember("CompileMicroseconds")]
+    public int64 parmCompileMicroseconds(int64 _value = compileMicroseconds) { compileMicroseconds = _value; return compileMicroseconds; }
+]]></Source></Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

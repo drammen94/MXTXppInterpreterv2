@@ -247,6 +247,238 @@ internal final class MXTXppIntrinsicFunctionHelper
 
 ]]></Source>
 			</Method>
+			<Method>
+				<Name>validateDataEntityViewName</Name>
+				<Source><![CDATA[
+    public static void validateDataEntityViewName(str _name)
+    {
+        if (Microsoft.Dynamics.Ax.Xpp.MetadataSupport::GetDataEntityView(_name) == null &&
+            Microsoft.Dynamics.Ax.Xpp.MetadataSupport::GetDataEntity(_name) == null)
+        {
+            MXTXppIntrinsicFunctionHelper::throwArgumentException(_name, 'data entity');
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateViewName</Name>
+				<Source><![CDATA[
+    public static void validateViewName(str _name)
+    {
+        if (Microsoft.Dynamics.Ax.Xpp.MetadataSupport::GetView(_name) == null)
+        {
+            MXTXppIntrinsicFunctionHelper::throwArgumentException(_name, 'view');
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateMapName</Name>
+				<Source><![CDATA[
+    public static void validateMapName(str _name)
+    {
+        if (Microsoft.Dynamics.Ax.Xpp.MetadataSupport::GetMap(_name) == null)
+        {
+            MXTXppIntrinsicFunctionHelper::throwArgumentException(_name, 'map');
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateServiceName</Name>
+				<Source><![CDATA[
+    public static void validateServiceName(str _name)
+    {
+        System.Collections.Specialized.StringEnumerator names =
+            Microsoft.Dynamics.Ax.Xpp.MetadataSupport::ServiceNames();
+
+        while (names.MoveNext())
+        {
+            if (names.Current == _name)
+            {
+                return;
+            }
+        }
+
+        MXTXppIntrinsicFunctionHelper::throwArgumentException(_name, 'service');
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateDataEntityDataSource</Name>
+				<Source><![CDATA[
+    public static void validateDataEntityDataSource(str _entityName, str _dataSourceName)
+    {
+        var entity = Microsoft.Dynamics.Ax.Xpp.MetadataSupport::GetDataEntityView(_entityName);
+
+        if (entity == null)
+        {
+            MXTXppIntrinsicFunctionHelper::throwArgumentException(_entityName, 'data entity');
+        }
+
+        if (entity.ViewMetadata == null || !entity.ViewMetadata.DataSources.Contains(_dataSourceName))
+        {
+            throw new System.Exception(strFmt("Data entity '%1' does not contain a data source named '%2'.", _entityName, _dataSourceName));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateIndexName</Name>
+				<Source><![CDATA[
+    public static void validateIndexName(str _tableName, str _indexName)
+    {
+        MXTXppIntrinsicFunctionHelper::validateTableName(_tableName);
+
+        if (!indexName2Id(tableName2Id(_tableName), _indexName))
+        {
+            throw new System.Exception(strFmt("Table '%1' does not contain an index named '%2'.", _tableName, _indexName));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateTableMethod</Name>
+				<Source><![CDATA[
+    public static void validateTableMethod(str _tableName, str _methodName, boolean _mustBeStatic)
+    {
+        MXTXppIntrinsicFunctionHelper::validateTableName(_tableName);
+        SysDictTable dictTable = SysDictTable::newName(_tableName);
+        Set methods = dictTable.methods(true, true, true, tableStr(Common));
+        SetEnumerator enumerator = methods.getEnumerator();
+
+        while (enumerator.moveNext())
+        {
+            SysDictMethod method = enumerator.current() as SysDictMethod;
+            if (method.name() == _methodName && method.isStatic() == _mustBeStatic)
+            {
+                return;
+            }
+        }
+
+        throw new System.Exception(strFmt("Table '%1' does not contain the %2 method '%3'.",
+            _tableName, _mustBeStatic ? 'static' : 'instance', _methodName));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateFormDataSource</Name>
+				<Source><![CDATA[
+    public static void validateFormDataSource(str _formName, str _dataSourceName)
+    {
+        var form = Microsoft.Dynamics.Ax.Xpp.MetadataSupport::GetForm(_formName);
+        if (form == null)
+        {
+            MXTXppIntrinsicFunctionHelper::throwArgumentException(_formName, 'form');
+        }
+        if (!form.DataSources.Contains(_dataSourceName))
+        {
+            throw new System.Exception(strFmt("Form '%1' does not contain a data source named '%2'.", _formName, _dataSourceName));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateFormDataField</Name>
+				<Source><![CDATA[
+    public static void validateFormDataField(str _formName, str _dataSourceName, str _fieldName)
+    {
+        MXTXppIntrinsicFunctionHelper::validateFormDataSource(_formName, _dataSourceName);
+        var form = Microsoft.Dynamics.Ax.Xpp.MetadataSupport::GetForm(_formName);
+        var dataSource = form.DataSources.getObject(_dataSourceName);
+        if (!dataSource.Fields.Contains(_fieldName))
+        {
+            throw new System.Exception(strFmt("Form data source '%1.%2' does not contain a field named '%3'.",
+                _formName, _dataSourceName, _fieldName));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateFormMethod</Name>
+				<Source><![CDATA[
+    public static void validateFormMethod(str _formName, str _methodName)
+    {
+        var form = Microsoft.Dynamics.Ax.Xpp.MetadataSupport::GetForm(_formName);
+        if (form == null || !form.Methods.Contains(_methodName))
+        {
+            throw new System.Exception(strFmt("Form '%1' does not contain a method named '%2'.", _formName, _methodName));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateFormControl</Name>
+				<Source><![CDATA[
+    public static void validateFormControl(str _formName, str _controlName)
+    {
+        var form = Microsoft.Dynamics.Ax.Xpp.MetadataSupport::GetForm(_formName);
+        if (form == null || !MXTXppIntrinsicFunctionHelper::containsNamedChild(form.Design, 'Controls', _controlName))
+        {
+            throw new System.Exception(strFmt("Form '%1' does not contain a control named '%2'.", _formName, _controlName));
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>containsNamedChild</Name>
+				<Source><![CDATA[
+    private static boolean containsNamedChild(System.Object _parent, str _collectionProperty, str _name)
+    {
+        if (_parent == null) return false;
+
+        System.Reflection.PropertyInfo collectionProperty = _parent.GetType().GetProperty(_collectionProperty);
+        if (collectionProperty == null) return false;
+
+        System.Collections.IEnumerable children = collectionProperty.GetValue(_parent) as System.Collections.IEnumerable;
+        if (children == null) return false;
+
+        System.Collections.IEnumerator childEnumerator = children.GetEnumerator();
+        while (childEnumerator.MoveNext())
+        {
+            System.Object child = childEnumerator.Current;
+            System.Reflection.PropertyInfo nameProperty = child.GetType().GetProperty('Name');
+            if (nameProperty != null && nameProperty.GetValue(child) == _name)
+            {
+                return true;
+            }
+
+            if (MXTXppIntrinsicFunctionHelper::containsNamedChild(child, _collectionProperty, _name))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>validateTableFieldGroup</Name>
+				<Source><![CDATA[
+    public static void validateTableFieldGroup(str _tableName, str _fieldGroupName)
+    {
+        var table = Microsoft.Dynamics.Ax.Xpp.MetadataSupport::GetTable(_tableName);
+        if (table == null || !table.FieldGroups.Contains(_fieldGroupName))
+        {
+            throw new System.Exception(strFmt("Table '%1' does not contain a field group named '%2'.", _tableName, _fieldGroupName));
+        }
+    }
+
+]]></Source>
+			</Method>
 		</Methods>
 	</SourceCode>
 </AxClass>

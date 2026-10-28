@@ -34,6 +34,8 @@ internal final class MXTXppInterpreterBatchProcess
 
         parameters.EmitGlobalTtsAbort   = _dataContract.parmEmitGlobalTtsAbort() ? NoYes::Yes : NoYes::No;
         parameters.MaxLoopIteratations  = _dataContract.parmMaxLoopIterations();
+        parameters.MaxInstructions      = _dataContract.parmMaxInstructions();
+        parameters.MaxExecutionMilliseconds = _dataContract.parmMaxExecutionMilliseconds();
 
         return parameters;
     }

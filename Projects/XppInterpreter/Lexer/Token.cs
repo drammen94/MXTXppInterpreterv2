@@ -44,6 +44,7 @@ namespace XppInterpreter.Lexer
                 { '=', TType.Assign },
                 { '?', TType.QuestionMark },
                 { '^', TType.BinaryXOr},
+                { '~', TType.BinaryNot},
             };
 
             public static char GetChar(TType tokenType)
@@ -147,7 +148,32 @@ namespace XppInterpreter.Lexer
         Print,
         Is,
         As,
+        Unchecked,
+        Flush,
+        BinaryNot,
+        DateTime,
+
+        #region Class declarations
         Class,
+        Interface,
+        Extends,
+        Implements,
+        Public,
+        Protected,
+        Private,
+        Internal,
+        Static,
+        Final,
+        Abstract,
+        Const,
+        ReadOnly,
+        Delegate,
+        ByRef,
+        Client,
+        Server,
+        Display,
+        Edit,
+        #endregion
 
         #region Type identification
         TypeAnytype,
@@ -221,6 +247,7 @@ namespace XppInterpreter.Lexer
         #region Functions
         Void,
         Return,
+        EventHandler,
         #endregion
 
         EOF
