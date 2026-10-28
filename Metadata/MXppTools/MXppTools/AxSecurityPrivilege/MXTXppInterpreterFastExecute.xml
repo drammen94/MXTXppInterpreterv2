@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxSecurityPrivilege xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppInterpreterFastExecute</Name>
+	<Label>Execute rollback-only interpreted X++</Label>
+	<DataEntityPermissions />
+	<DirectAccessPermissions />
+	<EntryPoints>
+		<AxSecurityEntryPointReference>
+			<Name>MXTXppInterpreterServiceExecute</Name>
+			<Grant>
+				<Correct>Allow</Correct>
+				<Create>Allow</Create>
+				<Delete>Allow</Delete>
+				<Read>Allow</Read>
+				<Update>Allow</Update>
+			</Grant>
+			<ObjectChildName>execute</ObjectChildName>
+			<ObjectName>MXTXppInterpreterService</ObjectName>
+			<ObjectType>ServiceOperation</ObjectType>
+			<Forms />
+		</AxSecurityEntryPointReference>
+		<AxSecurityEntryPointReference><Name>MXTXppInterpreterServiceDeployModule</Name><Grant><Correct>Allow</Correct><Create>Allow</Create><Delete>Allow</Delete><Read>Allow</Read><Update>Allow</Update></Grant><ObjectChildName>deployModule</ObjectChildName><ObjectName>MXTXppInterpreterService</ObjectName><ObjectType>ServiceOperation</ObjectType><Forms /></AxSecurityEntryPointReference>
+		<AxSecurityEntryPointReference><Name>MXTXppInterpreterServiceActivateModule</Name><Grant><Correct>Allow</Correct><Create>Allow</Create><Delete>Allow</Delete><Read>Allow</Read><Update>Allow</Update></Grant><ObjectChildName>activateModule</ObjectChildName><ObjectName>MXTXppInterpreterService</ObjectName><ObjectType>ServiceOperation</ObjectType><Forms /></AxSecurityEntryPointReference>
+		<AxSecurityEntryPointReference><Name>MXTXppInterpreterServiceRollbackModule</Name><Grant><Correct>Allow</Correct><Create>Allow</Create><Delete>Allow</Delete><Read>Allow</Read><Update>Allow</Update></Grant><ObjectChildName>rollbackModule</ObjectChildName><ObjectName>MXTXppInterpreterService</ObjectName><ObjectType>ServiceOperation</ObjectType><Forms /></AxSecurityEntryPointReference>
+		<AxSecurityEntryPointReference><Name>MXTXppInterpreterServiceExecuteModule</Name><Grant><Correct>Allow</Correct><Create>Allow</Create><Delete>Allow</Delete><Read>Allow</Read><Update>Allow</Update></Grant><ObjectChildName>executeModule</ObjectChildName><ObjectName>MXTXppInterpreterService</ObjectName><ObjectType>ServiceOperation</ObjectType><Forms /></AxSecurityEntryPointReference>
+		<AxSecurityEntryPointReference><Name>MXTXppInterpreterServiceGetModule</Name><Grant><Correct>Allow</Correct><Create>Allow</Create><Delete>Allow</Delete><Read>Allow</Read><Update>Allow</Update></Grant><ObjectChildName>getModule</ObjectChildName><ObjectName>MXTXppInterpreterService</ObjectName><ObjectType>ServiceOperation</ObjectType><Forms /></AxSecurityEntryPointReference>
+		<AxSecurityEntryPointReference><Name>MXTXppInterpreterServiceListModules</Name><Grant><Correct>Allow</Correct><Create>Allow</Create><Delete>Allow</Delete><Read>Allow</Read><Update>Allow</Update></Grant><ObjectChildName>listModules</ObjectChildName><ObjectName>MXTXppInterpreterService</ObjectName><ObjectType>ServiceOperation</ObjectType><Forms /></AxSecurityEntryPointReference>
+	</EntryPoints>
+	<FormControlOverrides />
+</AxSecurityPrivilege>

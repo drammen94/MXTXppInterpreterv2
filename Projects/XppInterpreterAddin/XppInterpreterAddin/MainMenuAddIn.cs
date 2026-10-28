@@ -13,7 +13,7 @@ using EnvDTE80;
 namespace XppInterpreterAddin
 {
     /// <summary>
-    /// TODO: Say a few words about what your AddIn is going to do
+    /// Opens the MXT X++ Interpreter workspace from the development-tools menu.
     /// </summary>
     [Export(typeof(IMainMenu))]
     public class MainMenuAddIn : MainMenuBase

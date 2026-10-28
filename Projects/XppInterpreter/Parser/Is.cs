@@ -14,6 +14,11 @@ namespace XppInterpreter.Parser
         public Expression Expression { get; }
         public string TypeName { get; }
 
+        /// <summary>
+        /// Set when the type name resolved to a .NET type unknown to the X++ proxies
+        /// </summary>
+        public System.Type ResolvedClrType { get; set; }
+
         public Is(Expression expression, string typeName, SourceCodeBinding sourceCodeBinding)
             : base(Word.Is, sourceCodeBinding, null)
         {

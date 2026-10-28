@@ -19,7 +19,8 @@ namespace XppInterpreter.Parser.Metadata.Providers
         public TokenMetadata GetTokenMetadata(XppProxy proxy)
         {
             StringBuilder builder = new StringBuilder();
-            System.Reflection.MethodInfo method = Core.ReflectionHelper.GetMethod(proxy.Intrinsic.GetType(), IntrinsicMethodName);
+            System.Reflection.MethodInfo method = typeof(IIntrinsicFunctionProvider).GetMethods()
+                .FirstOrDefault(candidate => string.Equals(candidate.Name, IntrinsicMethodName, StringComparison.OrdinalIgnoreCase));
 
             builder.Append("(builtin function) ");
             builder.Append(method.ReturnType.Name);

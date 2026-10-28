@@ -84,6 +84,8 @@ public class MXTXppInterpreterScriptExecutionLog extends common
                     throw error(strFmt("@MXT:ExecutionRoleException",
                         curUserId(), roleStr(MXTXppInterpreterRole)));
                 }
+
+                res = true;
             }
         }
         else

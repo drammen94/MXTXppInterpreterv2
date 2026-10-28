@@ -51,7 +51,7 @@ namespace XppInterpreter.Interpreter.Bytecode
                     break;
 
                 case TType.IntegerDivision:
-                    result = context.Proxy.Binary.Divide(left, right);
+                    result = context.Proxy.Binary.IntDivide(left, right);
                     break;
 
                 case TType.LeftShift:
@@ -79,11 +79,11 @@ namespace XppInterpreter.Interpreter.Bytecode
                     break;
 
                 case TType.Equal:
-                    result = context.Proxy.Binary.AreEqual(left, right);
+                    result = AreEqual(context, left, right);
                     break;
 
                 case TType.NotEqual:
-                    result = !context.Proxy.Binary.AreEqual(left, right);
+                    result = !AreEqual(context, left, right);
                     break;
 
                 case TType.Greater:
@@ -101,9 +101,44 @@ namespace XppInterpreter.Interpreter.Bytecode
                 case TType.SmallerOrEqual:
                     result = !context.Proxy.Binary.Greater(left, right);
                     break;
+
+                case TType.Like:
+                    result = LikeMatch(left, right);
+                    break;
             }
 
             context.Stack.Push(result);
+        }
+
+        /// <summary>
+        /// Script class instances compare by reference, everything else through the proxy
+        /// </summary>
+        private static bool AreEqual(RuntimeContext context, object left, object right)
+        {
+            if (left is ScriptObject || right is ScriptObject)
+            {
+                return ReferenceEquals(left, right);
+            }
+
+            return context.Proxy.Binary.AreEqual(left, right);
+        }
+
+        /// <summary>
+        /// X++ like operator: * matches any character sequence, ? matches exactly one character
+        /// </summary>
+        internal static bool LikeMatch(object value, object pattern)
+        {
+            string text = value?.ToString() ?? "";
+            string wildcard = pattern?.ToString() ?? "";
+
+            string regexPattern = "^" + System.Text.RegularExpressions.Regex.Escape(wildcard)
+                .Replace("\\*", ".*")
+                .Replace("\\?", ".") + "$";
+
+            return System.Text.RegularExpressions.Regex.IsMatch(
+                text,
+                regexPattern,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
         }
 
         public static bool IsArithmetic(TType tokenType)
@@ -134,6 +169,7 @@ namespace XppInterpreter.Interpreter.Bytecode
             { TType.BinaryOr, "BOR" },
             { TType.BinaryAnd, "BAND" },
             { TType.BinaryXOr, "BXOR" },
+            { TType.Like, "LIKE" },
         };
     }
 }

@@ -13,21 +13,21 @@ using System.Linq;
 /// <summary>
 /// Represents a debug / execution session initiated by the editor.
 /// </summary>
-public class MXTXppInterpreterDebugSession implements System.IDisposable
+public class MXTXppInterpreterDebugSession
 {
+    private const int MAX_VARIABLE_INSPECTOR_NESTED_LEVELS = 3;
+
     XppInterpreter  interpreter;
     Program         program;
     XppDebugger     debugger;
     boolean         executing, stopOnBreakpoint;
     str             sourceCode;
-    str             currentTraceName;
     InterpreterResult currentExecutionResult;
     MXTXppInterpreterCodeEditorParseExceptionCollection lastParseExceptions;
     MXTXppInterpreterCodeEditorControl          editor;
     MXTXppInterpreterVariablesInspectorControl  inspector;
+    MXTXppInterpreterVariableLookupTable        variableLookupTable;
     
-    private MXTXppInterpreterTraceParser        traceParser;
-
     XppInterpreterDependencyCollection          dependencyCollection;
 
     XppInterpreter.Interpreter.Proxy.XppProxy proxy = new XppInterpreter.Interpreter.Proxy.XppProxy(
@@ -137,10 +137,8 @@ public class MXTXppInterpreterDebugSession implements System.IDisposable
     /// <summary>
     /// Executes the program associated with the session
     /// </summary>
-    public void execute(str _traceName = "")
+    public void execute()
     {
-        currentTraceName = _traceName;
-
         editor.executionPhase(MXTXppInterpreterExecutionPhase::Started);
 
         if (inspector)
@@ -153,20 +151,18 @@ public class MXTXppInterpreterDebugSession implements System.IDisposable
         // Setup options
         XppInterpreter.Interpreter.XppInterpreterOptions options = new XppInterpreter.Interpreter.XppInterpreterOptions();
         options.EmitGlobalTtsAbort = parameters.EmitGlobalTtsAbort;
-        options.MaxLoopIterations = parameters.MaxLoopIteratations;
+        options.MaxLoopIterations = parameters.MaxLoopIteratations > 0 ? parameters.MaxLoopIteratations : 100000;
+        options.MaxInstructions = parameters.MaxInstructions > 0 ? parameters.MaxInstructions : 1000000;
+        options.MaxExecutionMilliseconds = parameters.MaxExecutionMilliseconds > 0 ? parameters.MaxExecutionMilliseconds : 300000;
 
         interpreter = new XppInterpreter.Interpreter.XppInterpreter(proxy, options);
         interpreter.Debugger = debugger;
 
         MXTXppInterpreterScriptExecutionLog::startLog(sourceCode, parameters.EmitGlobalTtsAbort);
 
-        if (currentTraceName)
-        {
-            traceParser = MXTXppInterpreterTraceParser::newFromTraceName(currentTraceName);
-            traceParser.startSQLTrace();
-        }
-
         this.executionStarted();
+
+        variableLookupTable = new MXTXppInterpreterVariableLookupTable();
 
         executing = true;
 
@@ -192,40 +188,6 @@ public class MXTXppInterpreterDebugSession implements System.IDisposable
         {
             this.handleExecutionFinished();
         }
-    }
-
-]]></Source>
-			</Method>
-			<Method>
-				<Name>stopTrace</Name>
-				<Source><![CDATA[
-    /// <summary>
-    /// Logs the traces 
-    /// </summary>
-    public MXTXppTrace stopTrace()
-    {
-        MXTXppTrace trace;
-
-        if (currentTraceName && traceParser)
-        {
-            traceParser.stop();
-            traceParser.import();
-
-            trace = MXTXppTrace::newTrace(
-                currentTraceName,
-                traceParser.sqlStatements(),
-                traceParser.sqlStatementsWithParameterValues(),
-                traceParser.sqlStatementsMetadata(),
-                DateTimeUtil::getSystemDateTime(),
-                traceParser.getEtlFileName());
-
-            // Clear resource
-            traceParser.Dispose();
-            traceParser = null;
-            currentTraceName = "";
-        }
-
-        return trace;
     }
 
 ]]></Source>
@@ -267,7 +229,7 @@ public class MXTXppInterpreterDebugSession implements System.IDisposable
 
         List subentries = new List(Types::Class);
         Set variablesInScope = new Set(Types::String);
-
+        
         if (currentExecutionResult != null)
         {
             var currentScope = this.getCurrentScopeHandler(currentExecutionResult.SaveState.Context).CurrentScope;
@@ -285,24 +247,22 @@ public class MXTXppInterpreterDebugSession implements System.IDisposable
                     {
                         var value = scopeEntry.Value;
 
-                        // Create entry
                         MXTXppInterpreterVariablesInspectorLocalsEntry subEntry = new MXTXppInterpreterVariablesInspectorLocalsEntry();
 
+                        // Root path
+                        str path = scopeEntry.VariableName;
+
+                        str displayValue = MXTXppInterpreterVariableInspectorEntryManager::GetDebugDisplayValue(scopeEntry.Value);
+
                         subEntry.parmName(scopeEntry.VariableName);
-                        
-                        str displayValue = DebugHelper::GetDebugDisplayValue(value);
-
-                        if (typeOf(value) == Types::Record && !value)
-                        {
-                            displayValue = 'No data selected';
-                        }
-
                         subEntry.parmValue(displayValue);
                         subEntry.parmType(scopeEntry.TypeName);
                         subEntry.parmEditable(scopeEntry.Editable);
-                        subEntry.parmChanged(scopeEntry.Changed);
+                        subEntry.parmExpandable(MXTXppInterpreterVariableInspectorEntryManager::IsExpandableType(subEntry.parmType(), scopeEntry.Value));
+                        subEntry.parmPath(path);
+                        subEntry.parmChanged(variableLookupTable.hasChanged(path, displayValue));
 
-                        //TODO: subEntry.parmEnumValues(scopeEntry.EnumValues);
+                        variableLookupTable.addVariable(path, value, scopeEntry.TypeName, 0);
 
                         subentries.addEnd(subEntry);
 
@@ -322,6 +282,38 @@ public class MXTXppInterpreterDebugSession implements System.IDisposable
 ]]></Source>
 			</Method>
 			<Method>
+				<Name>requestExpandVariable</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Expands a variable by it's path
+    /// </summary>
+    /// <param name = "_path">Variable path</param>
+    /// <returns>Expanded variable entry</returns>
+    public MXTXppInterpreterVariablesInspectorLocalsEntry requestExpandVariable(str _path)
+    {
+        MXTXppInterpreterVariableInspectorEntryManager  manager = new MXTXppInterpreterVariableInspectorEntryManager(variableLookupTable);
+        MXTXppInterpreterVariableLookupValue            lookupValue = variableLookupTable.getValue(_path);
+        MXTXppInterpreterVariablesInspectorLocalsEntry  rootEntry = new MXTXppInterpreterVariablesInspectorLocalsEntry();
+        
+        rootEntry.parmName('ROOT');
+        rootEntry.parmPath(_path);
+
+        str typeName = lookupValue.parmType();
+
+        if (typeName == "")
+        {
+            return rootEntry;
+        }
+
+        rootEntry.parmType(typeName);
+        manager.addSubentries(rootEntry, lookupValue.parmValue());
+
+        return rootEntry;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
 				<Name>handleExecutionFinished</Name>
 				<Source><![CDATA[
     /// <summary>
@@ -329,6 +321,7 @@ public class MXTXppInterpreterDebugSession implements System.IDisposable
     /// </summary>
     private void handleExecutionFinished()
     {
+        variableLookupTable = null;
         currentExecutionResult = null;
         executing = false;
 
@@ -568,16 +561,17 @@ public class MXTXppInterpreterDebugSession implements System.IDisposable
     /// <param name = "_varName">Variable name</param>
     /// <param name = "_newValue">New value for the variable as a string</param>
     /// <returns>An instance of <c>MXTXppInterpreterVariableEditContract</c></returns>
-    public MXTXppInterpreterVariableEditContract tryUpdateVariableValue(str _varName, str _newValue)
+    public MXTXppInterpreterVariableEditContract tryUpdateVariableValue(str _path, str _newValue)
     {
         if (!stopOnBreakpoint) return null;
 
-        VariableEditValueResponse response = this.getCurrentScopeHandler(currentExecutionResult.SaveState.Context).TrySetVariableValueFromString(_varName, _newValue);
+        VariableEditValueResponse response = this.getCurrentScopeHandler(currentExecutionResult.SaveState.Context).TrySetVariableValueFromString(_path, _newValue, variableLookupTable.getValue(_path).parmType());
 
         MXTXppInterpreterVariableEditContract ret = new MXTXppInterpreterVariableEditContract();
 
         ret.parmValue(response.Value);
         ret.parmError(response.Error);
+        ret.parmTypeName(response.TypeName);
 
         return ret;
     }
@@ -640,7 +634,7 @@ public class MXTXppInterpreterDebugSession implements System.IDisposable
     /// <returns></returns>
     public MXTXppTokenMetadata getTokenMetadata(int _line, int _position, boolean _isMethodParameters, str _sourceCode)
     {
-        XppInterpreter.Lexer.XppLexer lexer = new XppInterpreter.Lexer.XppLexer(_sourceCode);
+        XppInterpreter.Lexer.XppLexer lexer = MXTXppInterpreterExecutor::createLexer(_sourceCode);
         XppInterpreter.Parser.XppParser parser = new XppInterpreter.Parser.XppParser(lexer, proxy);
 
         XppInterpreter.Parser.Metadata.TokenMetadata metadata = parser.GetTokenMetadataAt(_line, _position, _isMethodParameters);
@@ -660,15 +654,30 @@ public class MXTXppInterpreterDebugSession implements System.IDisposable
 ]]></Source>
 			</Method>
 			<Method>
-				<Name>Dispose</Name>
+				<Name>executeImmediateCode</Name>
 				<Source><![CDATA[
-    public void Dispose()
+    public MXTXppInterpreterImmediateExecutionResult executeImmediateCode(str _code)
     {
-        if (traceParser)
+        MXTXppInterpreterImmediateExecutionResult ret = new MXTXppInterpreterImmediateExecutionResult();
+        if (!stopOnBreakpoint)
         {
-            traceParser.Dispose();
-            traceParser = null;
+            // Parse as an expression
+            ret.parmError("The interpreter is not paused at a breakpoint.");
+            return ret;
         }
+        System.Exception ex;
+        try
+        {
+            anytype output = MXTXppInterpreterExecutor::executeExpressionWithContext(_code, currentExecutionResult.SaveState.Context);
+
+            ret.parmOutput(DebugHelper::GetDebugDisplayValue(output));
+            ret.parmError();
+        }
+        catch (ex)
+        {
+            ret.parmError(ex.Message);
+        }
+        return ret;
     }
 
 ]]></Source>

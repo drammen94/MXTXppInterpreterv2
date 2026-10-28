@@ -15,6 +15,8 @@ namespace XppInterpreter.Lexer
         public static readonly Dictionary<string, Word> Keywords = new Dictionary<string, Word>(StringComparer.InvariantCultureIgnoreCase);
         readonly StringReader reader;
         readonly List<IScanResult> peekResults = new List<IScanResult>();
+        readonly Queue<IScanResult> _pendingTokens = new Queue<IScanResult>();
+        readonly MacroPreprocessor _preprocessor;
         readonly string _sourceCode;
 
         char peek = ' ';
@@ -23,16 +25,24 @@ namespace XppInterpreter.Lexer
         int positionEnd = 0;
         int positionStart = 0;
 
+        int currentPosition = -1;
         int previousPositionStart = -1;
         int previousPositionEnd = -1;
 
         private static DateTime MIN_DATE = new DateTime(1900, 1, 1);
         private static DateTime MAX_DATE = new DateTime(2154, 12, 31);
 
-        public XppLexer(string source)
+        public MacroPreprocessor Preprocessor => _preprocessor;
+
+        public XppLexer(string source) : this(source, null)
+        {
+        }
+
+        public XppLexer(string source, MacroPreprocessor preprocessor)
         {
             _sourceCode = source;
             reader = new StringReader(_sourceCode);
+            _preprocessor = preprocessor ?? new MacroPreprocessor();
         }
 
         static XppLexer()
@@ -213,7 +223,7 @@ namespace XppInterpreter.Lexer
             var lastPeek = peek;
 
             peek = (char)reader.Read();
-
+            
             if (lastPeek == char.MaxValue && peek == char.MaxValue)
             {
                 return;
@@ -221,6 +231,7 @@ namespace XppInterpreter.Lexer
 
             previousPositionEnd = positionEnd;
             positionEnd++;
+            currentPosition++;
 
             if (peek == '\n')
             {
@@ -276,6 +287,122 @@ namespace XppInterpreter.Lexer
             return new DateLiteral((int)day, (int)month, (int)year);
         }
 
+        private static bool IsHexDigit(char c)
+        {
+            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        }
+
+        /// <summary>
+        /// Checks if the source code at the current position (a '-' after a number)
+        /// continues with a utcdatetime literal pattern (yyyy-mm-ddThh:mm:ss)
+        /// </summary>
+        private bool IsUtcDateTimeAhead()
+        {
+            return currentPosition >= 0 &&
+                System.Text.RegularExpressions.Regex.IsMatch(
+                    _sourceCode.Substring(currentPosition),
+                    @"^-\d{1,2}-\d{1,2}T\d{1,2}:\d{1,2}:\d{1,2}");
+        }
+
+        /// <summary>
+        /// Scans a utcdatetime literal (yyyy-mm-ddThh:mm:ss). The year part has
+        /// already been consumed by the number scanner.
+        /// </summary>
+        private DateTime ScanUtcDateTime(long year)
+        {
+            ReadChar();
+            long month = ScanNumber();
+
+            if (peek != '-')
+            {
+                throw new ParseException("Expected - in utcdatetime literal.", new Token(TType.DateTime), line, positionEnd);
+            }
+
+            ReadChar();
+            long day = ScanNumber();
+
+            if (peek != 'T')
+            {
+                throw new ParseException("Expected T in utcdatetime literal.", new Token(TType.DateTime), line, positionEnd);
+            }
+
+            ReadChar();
+            long hour = ScanNumber();
+
+            if (peek != ':')
+            {
+                throw new ParseException("Expected : in utcdatetime literal.", new Token(TType.DateTime), line, positionEnd);
+            }
+
+            ReadChar();
+            long minute = ScanNumber();
+
+            if (peek != ':')
+            {
+                throw new ParseException("Expected : in utcdatetime literal.", new Token(TType.DateTime), line, positionEnd);
+            }
+
+            ReadChar();
+            long second = ScanNumber();
+
+            try
+            {
+                return new DateTime((int)year, (int)month, (int)day, (int)hour, (int)minute, (int)second);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                throw new ParseException($"Invalid utcdatetime literal \"{year}-{month}-{day}T{hour}:{minute}:{second}\"", new Token(TType.DateTime), line, positionEnd);
+            }
+        }
+
+        /// <summary>
+        /// Scans the exponent part of a real literal in exponential notation (1.0e3)
+        /// </summary>
+        private decimal ScanExponent(decimal mantissa)
+        {
+            ReadChar(); // consume 'e' / 'E'
+
+            bool negative = false;
+
+            if (peek == '+' || peek == '-')
+            {
+                negative = peek == '-';
+                ReadChar();
+            }
+
+            if (!char.IsDigit(peek))
+            {
+                throw new ParseException("Invalid exponent in real literal.", new Token(TType.Real), line, positionEnd);
+            }
+
+            long exponent = ScanNumber();
+
+            // Beyond ~30 steps a decimal either overflows (positive exponent) or
+            // underflows to zero (negative), so larger exponents need no iteration
+            long iterations = Math.Min(exponent, 100);
+
+            decimal result = mantissa;
+
+            try
+            {
+                for (long i = 0; i < iterations; i++)
+                {
+                    result = negative ? result / 10 : result * 10;
+                }
+            }
+            catch (OverflowException)
+            {
+                throw new ParseException("Real literal is out of range.", new Token(TType.Real), line, positionEnd);
+            }
+
+            if (exponent > iterations && !negative && result != 0)
+            {
+                throw new ParseException("Real literal is out of range.", new Token(TType.Real), line, positionEnd);
+            }
+
+            return result;
+        }
+
         /// <summary>
         /// Scans a number
         /// </summary>
@@ -295,31 +422,187 @@ namespace XppInterpreter.Lexer
         }
 
         /// <summary>
+        /// Checks if the start of a string is triple quoted
+        /// </summary>
+        /// <param name="startingChar">Starting char of the string</param>
+        /// <param name="reader">An instance of <c>StringReader</c></param>
+        /// <returns>True if is triple quoted string start</returns>
+        private bool IsTripleQuoteStart(char startingChar)
+        {
+            if (currentPosition + 1 < _sourceCode.Length && _sourceCode[currentPosition + 1] == startingChar &&
+                currentPosition + 2 < _sourceCode.Length && _sourceCode[currentPosition + 2] == startingChar)
+            {
+                ReadChar();
+                ReadChar();
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if the end of a string is triple quoted
+        /// </summary>
+        /// <param name="currentChar">Current scanning character</param>
+        /// <param name="startingChar">Starting char of the string</param>
+        /// <param name="reader">An instance of <c>StringReader</c></param>
+        /// <param name="builder">An instance of <c>StringBuilder</c></param>
+        /// <returns></returns>
+        private bool IsTripleQuoteEnd(char currentChar, char startingChar)
+        {
+            if (currentChar != startingChar)
+                return false;
+
+            bool secondStartingChar = currentPosition + 1 < _sourceCode.Length && _sourceCode[currentPosition + 1] == startingChar;
+
+            if (secondStartingChar && currentPosition + 2 < _sourceCode.Length && _sourceCode[currentPosition + 2] == startingChar)
+            {
+                ReadChar();
+                ReadChar();
+                return true;
+            }
+
+            return false;
+        }
+
+        private char ReadEscapeSequence(StringReader reader)
+        {
+            ReadChar();
+
+            if (peek == char.MaxValue)
+            {
+                throw new ParseException(
+                    "Invalid escape sequence.",
+                    new Token(TType.String),
+                    line,
+                    positionEnd
+                );
+            }
+
+            switch (peek)
+            {
+                case 'n': return '\n';
+                case 'r': return '\r';
+                case 't': return '\t';
+                case '\\': return '\\';
+                case '"': return '"';
+                case '\'': return '\'';
+                case '0': return '\0';
+                case 'a': return '\a';
+                case 'b': return '\b';
+                case 'f': return '\f';
+                case 'v': return '\v';
+                default: return peek;
+            }
+        }
+
+        /// <summary>
         /// Scans a string token
         /// </summary>
         /// <param name="startingChar">String token delimiter</param>
         /// <returns>Read string</returns>
-        public string ScanString(char startingChar)
+        public string ScanString(char startingChar, bool tripleQuotedAllowed)
+        {
+            StringBuilder builder = new StringBuilder();
+            bool isTripleQuoted = tripleQuotedAllowed && IsTripleQuoteStart(startingChar);
+
+            while (true)
+            {
+                ReadChar();
+                char ch = peek;
+
+                if (ch == char.MaxValue)
+                {
+                    throw new ParseException(
+                        "String not finalized.",
+                        new Token(TType.String),
+                        line,
+                        positionEnd
+                    );
+                }
+
+                if (!isTripleQuoted)
+                {
+                    if (ch == startingChar)
+                    { 
+                        break;
+                    }
+
+                    if (ch == '\n' || ch == '\r')
+                    {
+                        throw new ParseException(
+                            "Multiline strings are only allowed with triple quotes.",
+                            new Token(TType.String),
+                            line,
+                            positionEnd
+                        );
+                    }
+                }
+                else
+                {
+                    if (IsTripleQuoteEnd(ch, startingChar))
+                    {
+                        break;
+                    }
+                }
+
+                if (ch == '\\')
+                {
+                    builder.Append(ReadEscapeSequence(reader));
+                }
+                else
+                {
+                    builder.Append(ch);
+                }
+            }
+
+            ReadChar();
+            return builder.ToString();
+        }
+
+        /// <summary>
+        /// Scans a verbatim string (@"...") where backslash escapes are disabled,
+        /// newlines are allowed and a doubled delimiter denotes a literal delimiter
+        /// </summary>
+        /// <param name="startingChar">String token delimiter</param>
+        /// <returns>Read string</returns>
+        public string ScanVerbatimString(char startingChar)
         {
             StringBuilder builder = new StringBuilder();
 
-            ReadChar();
-
-            for (; ; ReadChar())
+            while (true)
             {
-                if (peek == startingChar)
-                {
-                    ReadChar();
+                ReadChar();
+                char ch = peek;
 
-                    return builder.ToString();
-                }
-                else if (peek == char.MaxValue)
+                if (ch == char.MaxValue)
                 {
-                    throw new ParseException("String not finalized.", new Token(TType.String), line, positionEnd);
+                    throw new ParseException(
+                        "String not finalized.",
+                        new Token(TType.String),
+                        line,
+                        positionEnd
+                    );
                 }
 
-                builder.Append(peek);
+                if (ch == startingChar)
+                {
+                    // A doubled delimiter is an escaped literal delimiter
+                    if (currentPosition + 1 < _sourceCode.Length && _sourceCode[currentPosition + 1] == startingChar)
+                    {
+                        ReadChar();
+                        builder.Append(startingChar);
+                        continue;
+                    }
+
+                    break;
+                }
+
+                builder.Append(ch);
             }
+
+            ReadChar();
+            return builder.ToString();
         }
 
         /// <summary>
@@ -356,6 +639,532 @@ namespace XppInterpreter.Lexer
             return false;
         }
 
+        #region Preprocessor
+
+        /// <summary>
+        /// Handles a preprocessor directive or macro reference starting at '#'.
+        /// Directive definitions produce no tokens; macro references enqueue their
+        /// expansion tokens stamped with the usage-site position, so the debugger
+        /// and error markers keep pointing at the original source.
+        /// </summary>
+        private void ProcessPreprocessorDirective()
+        {
+            int usageLine = line;
+            int usageStart = positionEnd - 1;
+
+            ReadChar(); // consume '#'
+
+            string word = ScanDirectiveWord();
+
+            if (word.Length == 0)
+            {
+                throw new ParseException("Invalid preprocessor directive.", new Token(TType.Invalid), line, positionEnd);
+            }
+
+            switch (word.ToLowerInvariant())
+            {
+                case "define":
+                case "globaldefine":
+                    {
+                        ExpectDirectiveChar('.');
+                        string name = ScanDirectiveWord();
+                        string value = string.Empty;
+
+                        if (peek == '(')
+                        {
+                            value = ScanBalancedParens();
+                        }
+
+                        _preprocessor.Define(name, value);
+                        break;
+                    }
+
+                case "undef":
+                    {
+                        ExpectDirectiveChar('.');
+                        _preprocessor.Undefine(ScanDirectiveWord());
+                        break;
+                    }
+
+                case "definc":
+                case "defdec":
+                    {
+                        ExpectDirectiveChar('.');
+                        _preprocessor.IncrementValue(ScanDirectiveWord(), word.ToLowerInvariant() == "definc" ? 1 : -1);
+                        break;
+                    }
+
+                case "localmacro":
+                case "macro":
+                    {
+                        ExpectDirectiveChar('.');
+                        string name = ScanDirectiveWord();
+                        _preprocessor.DefineLocalMacro(name, ScanUntilEndMacro());
+                        break;
+                    }
+
+                case "endmacro":
+                    // Stray #endmacro outside a #localmacro definition
+                    break;
+
+                case "if":
+                case "ifnot":
+                    {
+                        ExpectDirectiveChar('.');
+                        string name = ScanDirectiveWord();
+                        string value = null;
+
+                        if (peek == '(')
+                        {
+                            value = ScanBalancedParens();
+                        }
+
+                        bool defined = _preprocessor.IsDefined(name);
+                        bool condition = value is null
+                            ? defined
+                            : defined && string.Equals((_preprocessor.GetValue(name) ?? "").Trim(), value.Trim(), StringComparison.OrdinalIgnoreCase);
+
+                        if (word.ToLowerInvariant() == "ifnot")
+                        {
+                            condition = !condition;
+                        }
+
+                        if (!condition)
+                        {
+                            SkipConditionalBlock();
+                        }
+
+                        break;
+                    }
+
+                case "endif":
+                    // Closes an active (true) conditional block
+                    break;
+
+                case "linenumber":
+                    {
+                        EnqueueExpansionTokens((usageLine + 1).ToString(), usageLine, usageStart);
+                        break;
+                    }
+
+                case "macrolib":
+                    {
+                        ExpectDirectiveChar('.');
+                        string libraryName = ScanDirectiveWord();
+                        EnqueueExpansionTokens(ResolveMacroLibrary(libraryName), usageLine, usageStart);
+                        break;
+                    }
+
+                default:
+                    {
+                        // Macro reference: #Name or #Name(arg1, arg2, ...)
+                        if (!_preprocessor.TryGetMacro(word, out MacroPreprocessor.MacroDefinition macro))
+                        {
+                            // An unknown #Name is tried as a macro library include
+                            if (_preprocessor.MacroLibraryResolver != null)
+                            {
+                                EnqueueExpansionTokens(ResolveMacroLibrary(word), usageLine, usageStart);
+                                break;
+                            }
+
+                            throw new ParseException($"Macro #{word} is not defined.", new Token(TType.Invalid), usageLine, usageStart);
+                        }
+
+                        string expansion;
+
+                        if (macro.IsLocalMacro)
+                        {
+                            List<string> arguments = peek == '(' ? ScanMacroArguments() : new List<string>();
+                            expansion = MacroPreprocessor.SubstituteParameters(macro.Value, arguments);
+                        }
+                        else
+                        {
+                            expansion = macro.Value;
+                        }
+
+                        EnqueueExpansionTokens(expansion, usageLine, usageStart);
+                        break;
+                    }
+            }
+        }
+
+        private string ResolveMacroLibrary(string libraryName)
+        {
+            if (_preprocessor.MacroLibraryResolver is null)
+            {
+                throw new ParseException($"Macro library {libraryName} cannot be resolved in this environment.", new Token(TType.Invalid), line, positionEnd);
+            }
+
+            string source = _preprocessor.MacroLibraryResolver(libraryName);
+
+            if (source is null)
+            {
+                throw new ParseException($"Macro library {libraryName} was not found.", new Token(TType.Invalid), line, positionEnd);
+            }
+
+            return source;
+        }
+
+        /// <summary>
+        /// Lexes a macro expansion with a sub-lexer sharing this preprocessor state and
+        /// enqueues the resulting tokens stamped with the usage-site location.
+        /// </summary>
+        private void EnqueueExpansionTokens(string expansion, int usageLine, int usageStart)
+        {
+            if (string.IsNullOrWhiteSpace(expansion))
+            {
+                return;
+            }
+
+            if (_preprocessor.ExpansionDepth >= MacroPreprocessor.MaxExpansionDepth)
+            {
+                throw new ParseException(
+                    $"Macro expansion exceeds the maximum depth of {MacroPreprocessor.MaxExpansionDepth} (recursive macro definition?).",
+                    new Token(TType.Invalid),
+                    usageLine,
+                    usageStart);
+            }
+
+            int usageEnd = Math.Max(usageStart, positionEnd - 1);
+
+            _preprocessor.ExpansionDepth++;
+
+            try
+            {
+                var subLexer = new XppLexer(expansion, _preprocessor);
+
+                while (true)
+                {
+                    IScanResult result = subLexer.GetNextToken();
+
+                    if (result.Token.TokenType == TType.EOF)
+                    {
+                        break;
+                    }
+
+                    _pendingTokens.Enqueue(new ScanResult(result.Token, usageStart, usageEnd, usageLine));
+                }
+            }
+            finally
+            {
+                _preprocessor.ExpansionDepth--;
+            }
+        }
+
+        private string ScanDirectiveWord()
+        {
+            StringBuilder builder = new StringBuilder();
+
+            while (char.IsLetterOrDigit(peek) || peek == '_')
+            {
+                builder.Append(peek);
+                ReadChar();
+            }
+
+            return builder.ToString();
+        }
+
+        private void ExpectDirectiveChar(char expected)
+        {
+            if (peek != expected)
+            {
+                throw new ParseException($"Expected '{expected}' in preprocessor directive.", new Token(TType.Invalid), line, positionEnd);
+            }
+
+            ReadChar();
+        }
+
+        /// <summary>
+        /// Appends a complete string literal (honoring backslash escapes) to the
+        /// builder, leaving peek after the closing quote
+        /// </summary>
+        private void AppendStringLiteral(StringBuilder builder)
+        {
+            char quote = peek;
+            builder.Append(peek);
+            ReadChar();
+
+            while (peek != quote && peek != char.MaxValue)
+            {
+                if (peek == '\\')
+                {
+                    builder.Append(peek);
+                    ReadChar();
+
+                    if (peek == char.MaxValue)
+                    {
+                        return;
+                    }
+                }
+
+                builder.Append(peek);
+                ReadChar();
+            }
+
+            if (peek != char.MaxValue)
+            {
+                builder.Append(peek);
+                ReadChar();
+            }
+        }
+
+        /// <summary>
+        /// Captures the raw text between balanced parentheses, skipping over string
+        /// literals so parentheses inside strings do not affect the balance
+        /// </summary>
+        private string ScanBalancedParens()
+        {
+            StringBuilder builder = new StringBuilder();
+            int depth = 1;
+
+            ReadChar(); // consume '('
+
+            while (true)
+            {
+                if (peek == char.MaxValue)
+                {
+                    throw new ParseException("Preprocessor directive not finalized.", new Token(TType.Invalid), line, positionEnd);
+                }
+
+                if (peek == '\'' || peek == '"')
+                {
+                    AppendStringLiteral(builder);
+                    continue;
+                }
+
+                if (peek == '(')
+                {
+                    depth++;
+                }
+                else if (peek == ')')
+                {
+                    depth--;
+
+                    if (depth == 0)
+                    {
+                        break;
+                    }
+                }
+
+                builder.Append(peek);
+                ReadChar();
+            }
+
+            ReadChar(); // move past ')'
+            return builder.ToString();
+        }
+
+        /// <summary>
+        /// Captures raw macro arguments between parentheses, split on top-level commas
+        /// </summary>
+        private List<string> ScanMacroArguments()
+        {
+            var arguments = new List<string>();
+            StringBuilder builder = new StringBuilder();
+            int depth = 1;
+
+            ReadChar(); // consume '('
+
+            while (true)
+            {
+                if (peek == char.MaxValue)
+                {
+                    throw new ParseException("Macro arguments not finalized.", new Token(TType.Invalid), line, positionEnd);
+                }
+
+                if (peek == '\'' || peek == '"')
+                {
+                    // Commas and parentheses inside string arguments are literal text
+                    AppendStringLiteral(builder);
+                    continue;
+                }
+
+                if (peek == '(')
+                {
+                    depth++;
+                    builder.Append(peek);
+                }
+                else if (peek == ')')
+                {
+                    depth--;
+
+                    if (depth == 0)
+                    {
+                        break;
+                    }
+
+                    builder.Append(peek);
+                }
+                else if (peek == ',' && depth == 1)
+                {
+                    arguments.Add(builder.ToString().Trim());
+                    builder.Clear();
+                }
+                else
+                {
+                    builder.Append(peek);
+                }
+
+                ReadChar();
+            }
+
+            ReadChar(); // move past ')'
+
+            if (builder.Length > 0 || arguments.Count > 0)
+            {
+                arguments.Add(builder.ToString().Trim());
+            }
+
+            return arguments;
+        }
+
+        /// <summary>
+        /// Reads the directive word following a '#' at the current position without
+        /// consuming any characters
+        /// </summary>
+        private string PeekDirectiveWord()
+        {
+            int wordStart = currentPosition + 1;
+            int wordEnd = wordStart;
+
+            while (wordEnd < _sourceCode.Length &&
+                (char.IsLetterOrDigit(_sourceCode[wordEnd]) || _sourceCode[wordEnd] == '_'))
+            {
+                wordEnd++;
+            }
+
+            return _sourceCode.Substring(wordStart, wordEnd - wordStart);
+        }
+
+        /// <summary>
+        /// Captures the raw body of a #localmacro definition up to its matching
+        /// #endmacro, skipping string literals, matching the directive name on a word
+        /// boundary, and honoring nested #localmacro definitions
+        /// </summary>
+        private string ScanUntilEndMacro()
+        {
+            StringBuilder builder = new StringBuilder();
+            int depth = 1;
+
+            while (true)
+            {
+                if (peek == char.MaxValue)
+                {
+                    throw new ParseException("#endmacro expected.", new Token(TType.Invalid), line, positionEnd);
+                }
+
+                if (peek == '\'' || peek == '"')
+                {
+                    AppendStringLiteral(builder);
+                    continue;
+                }
+
+                if (peek == '#')
+                {
+                    string word = PeekDirectiveWord();
+
+                    if (string.Equals(word, "endmacro", StringComparison.OrdinalIgnoreCase))
+                    {
+                        depth--;
+
+                        if (depth == 0)
+                        {
+                            // Consume '#endmacro'
+                            for (int i = 0; i <= word.Length; i++)
+                            {
+                                ReadChar();
+                            }
+
+                            break;
+                        }
+                    }
+                    else if (string.Equals(word, "localmacro", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(word, "macro", StringComparison.OrdinalIgnoreCase))
+                    {
+                        depth++;
+                    }
+                }
+
+                builder.Append(peek);
+                ReadChar();
+            }
+
+            return builder.ToString();
+        }
+
+        /// <summary>
+        /// Skips a false conditional region up to its matching #endif, honoring
+        /// nesting and ignoring directives inside string literals and comments
+        /// </summary>
+        private void SkipConditionalBlock()
+        {
+            int depth = 1;
+
+            while (depth > 0)
+            {
+                if (peek == char.MaxValue)
+                {
+                    throw new ParseException("#endif expected.", new Token(TType.Invalid), line, positionEnd);
+                }
+
+                if (peek == '\'' || peek == '"')
+                {
+                    char quote = peek;
+                    ReadChar();
+
+                    while (peek != quote && peek != char.MaxValue)
+                    {
+                        if (peek == '\\')
+                        {
+                            ReadChar();
+
+                            if (peek == char.MaxValue)
+                            {
+                                break;
+                            }
+                        }
+
+                        ReadChar();
+                    }
+
+                    if (peek != char.MaxValue)
+                    {
+                        ReadChar();
+                    }
+
+                    continue;
+                }
+
+                if (peek == '/')
+                {
+                    SkipComment();
+                    ReadChar();
+                    continue;
+                }
+
+                if (peek == '#')
+                {
+                    ReadChar();
+                    string word = ScanDirectiveWord().ToLowerInvariant();
+
+                    if (word == "if" || word == "ifnot")
+                    {
+                        depth++;
+                    }
+                    else if (word == "endif")
+                    {
+                        depth--;
+                    }
+                }
+                else
+                {
+                    ReadChar();
+                }
+            }
+        }
+
+        #endregion
+
         /// <summary>
         /// Actual method to read the next token
         /// </summary>
@@ -370,16 +1179,31 @@ namespace XppInterpreter.Lexer
                 return result;
             }
 
+            // Return macro expansion tokens before scanning further
+            if (_pendingTokens.Count > 0)
+            {
+                return _pendingTokens.Dequeue();
+            }
+
             // Keep reading until we find an elegible token
-            for (; ; ReadChar())
+            for (; ; )
             {
                 if (peek == ' ' || peek == '\t' || peek == '\r' || peek == '\n')
                 {
-                    continue;
+                    ReadChar();
                 }
                 else if (peek == '/' && SkipComment())
                 {
-                    continue;
+                    ReadChar();
+                }
+                else if (peek == '#')
+                {
+                    ProcessPreprocessorDirective();
+
+                    if (_pendingTokens.Count > 0)
+                    {
+                        return _pendingTokens.Dequeue();
+                    }
                 }
                 else
                 {
@@ -425,7 +1249,33 @@ namespace XppInterpreter.Lexer
                 case '"':
                 case '\'':
                     {
-                        return ScanResult(new String(ScanString(peek)));
+                        return ScanResult(new String(ScanString(peek, peek == '"')));
+                    }
+                case '@':
+                    {
+                        ReadChar();
+
+                        // Verbatim string: @"..." (no escape sequences, multiline allowed)
+                        if (peek == '"' || peek == '\'')
+                        {
+                            return ScanResult(new String(ScanVerbatimString(peek)));
+                        }
+
+                        // Identifier escape: @keyword is treated as a plain identifier
+                        if (char.IsLetter(peek) || peek == '_')
+                        {
+                            StringBuilder idBuilder = new StringBuilder();
+
+                            do
+                            {
+                                idBuilder.Append(peek);
+                                ReadChar();
+                            } while (char.IsLetterOrDigit(peek) || peek == '_');
+
+                            return ScanResult(new Word(idBuilder.ToString(), TType.Id));
+                        }
+
+                        throw new ParseException("Character not recognized.", new Token(TType.Invalid), line, previousPositionEnd);
                     }
                 case '<':
                     {
@@ -559,6 +1409,31 @@ namespace XppInterpreter.Lexer
 
             if (char.IsDigit(peek))
             {
+                // Hexadecimal literals (0xFF)
+                if (peek == '0' && currentPosition + 1 < _sourceCode.Length &&
+                    (_sourceCode[currentPosition + 1] == 'x' || _sourceCode[currentPosition + 1] == 'X') &&
+                    currentPosition + 2 < _sourceCode.Length && IsHexDigit(_sourceCode[currentPosition + 2]))
+                {
+                    ReadChar(); // consume '0'
+                    long hexValue = 0;
+
+                    do
+                    {
+                        ReadChar(); // first iteration consumes 'x'
+                        if (IsHexDigit(peek))
+                        {
+                            hexValue = hexValue * 16 + Convert.ToInt32(peek.ToString(), 16);
+                        }
+                    } while (IsHexDigit(peek));
+
+                    if (hexValue > int.MaxValue)
+                    {
+                        return ScanResult(new Int64(hexValue));
+                    }
+
+                    return ScanResult(new Int32((int)hexValue));
+                }
+
                 long value = ScanNumber();
 
                 if (peek != '.')
@@ -566,6 +1441,16 @@ namespace XppInterpreter.Lexer
                     if (peek == '\\')
                     {
                         return ScanResult(new Date(ScanDate((int)value)));
+                    }
+
+                    if (peek == '-' && IsUtcDateTimeAhead())
+                    {
+                        return ScanResult(new BaseType(ScanUtcDateTime(value), TType.DateTime));
+                    }
+
+                    if (peek == 'e' || peek == 'E')
+                    {
+                        return ScanResult(new Real(ScanExponent(value)));
                     }
 
                     if (value > int.MaxValue)
@@ -589,6 +1474,11 @@ namespace XppInterpreter.Lexer
 
                     x += (peek - '0') / d;
                     d *= 10;
+                }
+
+                if (peek == 'e' || peek == 'E')
+                {
+                    return ScanResult(new Real(ScanExponent(x)));
                 }
 
                 return ScanResult(new Real(x));
@@ -658,6 +1548,8 @@ namespace XppInterpreter.Lexer
             Reserve(Word.TtsAbort);
             Reserve(Word.TtsBegin);
             Reserve(Word.ChangeCompany);
+            Reserve(Word.Unchecked);
+            Reserve(Word.Flush);
             Reserve(Word.Select);
             Reserve(Word.From);
             Reserve(Word.Where);
@@ -702,6 +1594,7 @@ namespace XppInterpreter.Lexer
             Reserve(Word.Like);
             Reserve(Word.Is);
             Reserve(Word.As);
+            Reserve(Word.NoFetch);
 
             Reserve(Type.Int32);
             Reserve(Type.Int64);
@@ -713,9 +1606,32 @@ namespace XppInterpreter.Lexer
             Reserve(Type.TimeOfDay);
             Reserve(Type.Str);
             Reserve(Type.Var);
+            Reserve(Type.Boolean);
+            Reserve(Type.Guid);
 
             Reserve(Word.Void);
             Reserve(Word.Return);
+            Reserve(Word.EventHandler);
+
+            Reserve(Word.Class);
+            Reserve(Word.Interface);
+            Reserve(Word.Extends);
+            Reserve(Word.Implements);
+            Reserve(Word.Public);
+            Reserve(Word.Protected);
+            Reserve(Word.Private);
+            Reserve(Word.Internal);
+            Reserve(Word.Static);
+            Reserve(Word.Final);
+            Reserve(Word.Abstract);
+            Reserve(Word.Const);
+            Reserve(Word.ReadOnly);
+            Reserve(Word.Delegate);
+            Reserve(Word.ByRef);
+            Reserve(Word.Client);
+            Reserve(Word.Server);
+            Reserve(Word.Display);
+            Reserve(Word.Edit);
         }
     }
 }

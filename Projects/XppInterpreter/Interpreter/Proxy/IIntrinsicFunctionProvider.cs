@@ -8,6 +8,10 @@
         int classNum(string name);
         string classStr(string name);
         string formStr(string name);
+        string mapStr(string mapName);
+        string viewStr(string viewName);
+        string serviceStr(string serviceName);
+        string serviceOperationStr(string serviceName, string operationName);
         string extendedTypeStr(string name);
         string menuItemActionStr(string name);
         string menuItemDisplayStr(string name);
@@ -25,6 +29,8 @@
         int configurationKeyNum(string keyName);
         string configurationKeyStr(string keyName);
         string dataEntityDataSourceStr(string dataEntity, string dataSource);
+        string dataEntityStr(string dataEntity);
+        string dataEntityViewStr(string dataEntityView);
         string delegateStr(string className, string instanceDelegate);
         string dimensionHierarchyLevelStr(string dimensionHierarchyLevel);
         string dimensionHierarchyStr(string dimensionHierarchy);

@@ -9,13 +9,69 @@ using XppInterpreter.Interpreter.Query;
 
 namespace XppInterpreter.Interpreter
 {
+    public sealed class InterpreterLimitExceededException : Exception
+    {
+        public InterpreterLimitExceededException(string message) : base(message)
+        {
+        }
+    }
+
+    public sealed class RuntimeExecutionGuard
+    {
+        private readonly int _maxInstructions;
+        private readonly int _maxExecutionMilliseconds;
+        private readonly System.Diagnostics.Stopwatch _activeTime = new System.Diagnostics.Stopwatch();
+        private long _instructionCount;
+        private int _executionDepth;
+
+        public long InstructionCount => _instructionCount;
+
+        public RuntimeExecutionGuard(XppInterpreterOptions options)
+        {
+            _maxInstructions = Math.Max(0, options?.MaxInstructions ?? 0);
+            _maxExecutionMilliseconds = Math.Max(0, options?.MaxExecutionMilliseconds ?? 0);
+        }
+
+        public void Checkpoint()
+        {
+            _instructionCount++;
+
+            if (_maxInstructions > 0 && _instructionCount > _maxInstructions)
+            {
+                throw new InterpreterLimitExceededException($"Interpreter instruction limit of {_maxInstructions} was exceeded.");
+            }
+
+            if (_maxExecutionMilliseconds > 0 &&
+                _activeTime.ElapsedMilliseconds > _maxExecutionMilliseconds)
+            {
+                throw new InterpreterLimitExceededException($"Interpreter time limit of {_maxExecutionMilliseconds} ms was exceeded.");
+            }
+        }
+
+        public void EnterExecution()
+        {
+            if (_executionDepth++ == 0)
+            {
+                _activeTime.Start();
+            }
+        }
+
+        public void ExitExecution()
+        {
+            if (_executionDepth > 0 && --_executionDepth == 0)
+            {
+                _activeTime.Stop();
+            }
+        }
+    }
+
     public class RuntimeContext
     {
         private int _pc = 0;
         public int Counter => _pc;
         public Stack<object> Stack => ScopeHandler.CurrentScope.Stack;
         public Dictionary<Parser.Data.Query, ISearchInstance> Queries = new Dictionary<Parser.Data.Query, ISearchInstance>();
-        public Stack<IDisposable> ChangeCompanyHandlers = new Stack<IDisposable>();
+        public Stack<IDisposable> Disposables = new Stack<IDisposable>();
         public readonly ScopeHandler ScopeHandler;
         public readonly XppProxy Proxy;
         public readonly ByteCode ByteCode;
@@ -25,6 +81,38 @@ namespace XppInterpreter.Interpreter
         public RuntimeContext InnerContext;
         public XppInterpreter Interpreter;
         public DebugAction NextAction;
+
+        /// <summary>
+        /// Script class whose method is executing in this context. This is used to
+        /// enforce X++ private and protected access during runtime dispatch.
+        /// </summary>
+        public RuntimeClass ActiveClass;
+        public RuntimeClassMethod ActiveMethod;
+        public RuntimeExecutionGuard ExecutionGuard;
+        private Metadata.AosTypeDescriptorProvider _aosTypes;
+        public Metadata.AosTypeDescriptorProvider AosTypes =>
+            _aosTypes ?? (_aosTypes = new Metadata.AosTypeDescriptorProvider(Proxy));
+        private Metadata.DynamicModelRegistry _models;
+        public Metadata.DynamicModelRegistry Models
+        {
+            get
+            {
+                if (_models is null) _models = new Metadata.DynamicModelRegistry(this);
+                _models.Synchronize(ByteCode.DeclaredClasses);
+                return _models;
+            }
+        }
+
+        public void InheritExecutionState(RuntimeContext parent)
+        {
+            if (parent is null)
+            {
+                return;
+            }
+
+            ExecutionGuard = parent.ExecutionGuard;
+            ActiveClass = parent.ActiveClass;
+        }
 
         public RuntimeContext(XppProxy proxy, ByteCode bytecode)
         {

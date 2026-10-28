@@ -7,6 +7,7 @@
         public void Execute(RuntimeContext context)
         {
             context.Proxy.Data.TtsCommit();
+            context.Models.CommitTransaction();
 
             if (context.ScopeHandler.AreExceptionsHandled)
             {

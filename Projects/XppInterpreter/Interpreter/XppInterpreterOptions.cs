@@ -4,5 +4,7 @@
     {
         public bool EmitGlobalTtsAbort;
         public int MaxLoopIterations;
+        public int MaxInstructions;
+        public int MaxExecutionMilliseconds;
     }
 }

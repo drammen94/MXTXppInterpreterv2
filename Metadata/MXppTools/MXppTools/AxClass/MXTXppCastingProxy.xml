@@ -23,7 +23,7 @@ internal final class MXTXppCastingProxy implements XppInterpreter.Interpreter.Pr
     /// </summary>
     /// <param name = "_name">Type name</param>
     /// <returns>Types type</returns>
-    private static Types getXppTypeByTypeName(str _name)
+    public static Types getXppTypeByTypeName(str _name)
     {
         // Base Enums
         if (SysDictEnum::newName(_name) != null)
@@ -60,6 +60,7 @@ internal final class MXTXppCastingProxy implements XppInterpreter.Interpreter.Pr
             case MXtXppTypes::DateTimeTypeStr: return Types::UtcDateTime;
             case MXtXppTypes::StringTypeStr: return Types::String;
             case MXtXppTypes::DateTypeStr : return Types::Date;
+            case MXtXppTypes::TimeOfDayTypeStr: return Types::Time;
             case MXtXppTypes::AnyTypeTypeStr: return Types::AnyType;
         }
 
@@ -76,6 +77,7 @@ internal final class MXTXppCastingProxy implements XppInterpreter.Interpreter.Pr
         switch (_type)
         {
             case Types::Integer:
+            case Types::Time:
                 return MXTXppTypes::Int32Type;
 
             case Types::Int64:
@@ -88,6 +90,7 @@ internal final class MXTXppCastingProxy implements XppInterpreter.Interpreter.Pr
                 return MXTXppTypes::DecimalType;
 
             case Types::String:
+            case Types::VarString:
                 return MXTXppTypes::StringType;
 
             case Types::UtcDateTime:
@@ -173,6 +176,44 @@ internal final class MXTXppCastingProxy implements XppInterpreter.Interpreter.Pr
     {
         return value;
 	}
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>IsStringEDT</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Checks if a type is a string Extended Data Type
+    /// </summary>
+    /// <param name = "typeName">EDT to check</param>
+    /// <returns></returns>
+    public boolean IsStringEDT(System.String typeName)
+    {
+        var dictType = SysDictType::newName(typeName);
+
+        if (dictType != null)
+        {
+            return dictType.baseType() == Types::String;
+        }
+
+        return false;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>TruncateEDTString</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Truncates the string based on an EDT
+    /// </summary>
+    /// <param name = "value">String value to truncate</param>
+    /// <param name = "typeName">EDT name</param>
+    /// <returns></returns>
+    public System.String TruncateEDTString(System.String value, System.String typeName)
+    {
+        return Microsoft.Dynamics.Ax.Xpp.EdtHelper::GetEdtStringTruncated(value, typeName);
+    }
 
 ]]></Source>
 			</Method>
@@ -398,6 +439,7 @@ internal final class MXTXppCastingProxy implements XppInterpreter.Interpreter.Pr
         switch (types)
         {
             case Types::Integer: return 0;
+            case Types::Time: return 0;
             case Types::Real: return 0.0;
             case Types::Container: return conNull();
             case Types::Date: return dateNull();

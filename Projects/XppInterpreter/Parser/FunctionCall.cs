@@ -12,6 +12,11 @@ namespace XppInterpreter.Parser
         public List<Expression> Parameters { get; }
         public bool Intrinsical { get; }
 
+        /// <summary>
+        /// Positions and variable names of byref arguments (written back after CLR calls)
+        /// </summary>
+        public List<KeyValuePair<int, string>> ByRefArguments { get; set; }
+
         public FunctionCall(
             Word identifier,
             List<Expression> parameters,

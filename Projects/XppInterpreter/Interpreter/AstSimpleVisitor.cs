@@ -87,6 +87,12 @@ namespace XppInterpreter.Interpreter
             changeCompany.Block.Accept(this);
         }
 
+        public virtual void VisitUnchecked(Unchecked @unchecked)
+        {
+            @unchecked.Expression.Accept(this);
+            @unchecked.Block.Accept(this);
+        }
+
         public virtual void VisitConstant(Constant constant)
         {
         }
@@ -163,6 +169,10 @@ namespace XppInterpreter.Interpreter
         }
 
         public virtual void VisitNext(Next next)
+        {
+        }
+
+        public virtual void VisitFlush(Flush flush)
         {
         }
 
@@ -248,6 +258,14 @@ namespace XppInterpreter.Interpreter
             variable.Caller?.Accept(this);
         }
 
+        public virtual void VisitSelectExpression(SelectExpression selectExpression)
+        {
+        }
+
+        public virtual void VisitTableField(TableField tableField)
+        {
+        }
+
         public virtual void VisitVariableDeclarations(VariableDeclarations variableDeclaration)
         {
             foreach (var expr in variableDeclaration.Identifiers)
@@ -268,10 +286,27 @@ namespace XppInterpreter.Interpreter
             whileSelect.Block.Accept(this);
         }
 
-        public void VisitUsing(Using @using)
+        public virtual void VisitUsing(Using @using)
         {
             @using.VariableDeclaration.Accept(this);
             @using.Block.Accept(this);
+        }
+
+        public virtual void VisitEventHandlerSubscription(EventHandlerSubscription subscription)
+        {
+        }
+
+        public virtual void VisitClassDeclaration(ClassDeclaration classDeclaration)
+        {
+            foreach (var field in classDeclaration.Fields)
+            {
+                field.Declaration?.Accept(this);
+            }
+
+            foreach (var method in classDeclaration.Methods)
+            {
+                method.Block?.Accept(this);
+            }
         }
     }
 }

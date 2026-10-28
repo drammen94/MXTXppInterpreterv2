@@ -4,6 +4,7 @@ using System.Text;
 using XppInterpreter.Interpreter.Debug;
 using XppInterpreter.Lexer;
 using XppInterpreter.Parser;
+using XppInterpreter.Parser.Data;
 
 namespace XppInterpreter.Interpreter.Bytecode
 {
@@ -12,23 +13,48 @@ namespace XppInterpreter.Interpreter.Bytecode
         private readonly ByteCodeGenerationContext _generationContext = new ByteCodeGenerationContext();
         private readonly Stack<ByteCodeGenerationScope> _ss = new Stack<ByteCodeGenerationScope>();
         private readonly List<RefFunction> _declaredFunctions = new List<RefFunction>();
+        private readonly List<RuntimeClass> _declaredClasses = new List<RuntimeClass>();
         private readonly bool _hasMaxIterations;
         private bool _generateDebugInfo;
+        private RuntimeClass _currentRuntimeClass;
+        private RuntimeClassMethod _currentRuntimeMethod;
 
         public XppInterpreterOptions Options { get; }
-        public ByteCodeGenerator(XppInterpreterOptions options = null)
+
+        public ByteCodeGenerator(XppInterpreterOptions options = null, List<RefFunction> declaredFunctions = null, List<RuntimeClass> declaredClasses = null)
         {
             _ss.Push(new ByteCodeGenerationScope());
 
             Options = options;
             _hasMaxIterations = Options != null && Options.MaxLoopIterations > 0;
+
+            if (declaredFunctions != null)
+            {
+                _declaredFunctions.AddRange(declaredFunctions);
+            }
+
+            if (declaredClasses != null)
+            {
+                _declaredClasses.AddRange(declaredClasses);
+            }
         }
 
-        public ByteCode Generate(Program program, bool generateDebugInfo, List<RefFunction> dependencyFunctions = null)
+        public ByteCode GeneratedByteCode => new ByteCode(_ss.Peek().Instructions)
+        {
+            DeclaredFunctions = _declaredFunctions,
+            DeclaredClasses = _declaredClasses
+        };
+
+        public ByteCode Generate(Program program, bool generateDebugInfo, List<RefFunction> dependencyFunctions = null, List<RuntimeClass> dependencyClasses = null)
         {
             if (dependencyFunctions != null)
             {
                 _declaredFunctions.AddRange(dependencyFunctions);
+            }
+
+            if (dependencyClasses != null)
+            {
+                _declaredClasses.AddRange(dependencyClasses);
             }
 
             if (_ss.Count == 0)
@@ -42,7 +68,8 @@ namespace XppInterpreter.Interpreter.Bytecode
 
             return new ByteCode(_ss.Pop().Instructions)
             {
-                DeclaredFunctions = _declaredFunctions
+                DeclaredFunctions = _declaredFunctions,
+                DeclaredClasses = _declaredClasses
             };
 
         }
@@ -51,7 +78,8 @@ namespace XppInterpreter.Interpreter.Bytecode
         {
             return new ByteCode(_ss.Pop().Instructions)
             {
-                DeclaredFunctions = _declaredFunctions
+                DeclaredFunctions = _declaredFunctions,
+                DeclaredClasses = _declaredClasses
             };
         }
 
@@ -115,11 +143,23 @@ namespace XppInterpreter.Interpreter.Bytecode
             Emit(new Select(select.Query, _generationContext.IsWhileSelectBeingGenerated(select)));
         }
 
+        public void VisitSelectExpression(Parser.SelectExpression selectExpression)
+        {
+            EmitDebugSymbol(selectExpression);
+            Emit(new Select(selectExpression.Query, returnField: selectExpression.ReturnField));
+        }
+
         public void VisitNext(Parser.Next next)
         {
             EmitDebugSymbol(next);
             Emit(new VariableLoad(next.TableVariableName, false));
             Emit(new Next());
+        }
+
+        public void VisitFlush(Parser.Flush flush)
+        {
+            EmitDebugSymbol(flush);
+            Emit(new Flush(flush.TableName));
         }
 
         public void VisitWhileSelect(WhileSelect whileSelect)
@@ -136,6 +176,8 @@ namespace XppInterpreter.Interpreter.Bytecode
             whileSelect.Block.Accept(this);
             var blockScope = ReleaseScope();
 
+            int whileSelectStartIndex = _ss.Peek().Instructions.Count;
+
             EmitScope(selectScope);
             Emit(new JumpIfFalse(blockScope.Count + 1 + 1 /*Jump instruction*/));
             EmitScope(blockScope);
@@ -143,7 +185,15 @@ namespace XppInterpreter.Interpreter.Bytecode
 
             _generationContext.RemoveWhileSelect(whileSelect.Select);
 
-            this.RecalculateLoopControlOffsets(selectScope.Instructions.First());
+            this.RecalculateLoopControlOffsets(selectScope.Instructions.First(), whileSelectStartIndex);
+        }
+
+        public void VisitUnchecked(Parser.Unchecked @unchecked)
+        {
+            @unchecked.Expression.Accept(this);
+            Emit(new Unchecked());
+            @unchecked.Block.Accept(this);
+            Emit(new DisposeHandle());
         }
 
         public void VisitChangeCompany(Parser.ChangeCompany changeCompany)
@@ -151,7 +201,7 @@ namespace XppInterpreter.Interpreter.Bytecode
             changeCompany.Expression.Accept(this);
             Emit(new ChangeCompany());
             changeCompany.Block.Accept(this);
-            Emit(new ChangeCompanyDispose());
+            Emit(new DisposeHandle());
         }
 
         public void VisitContainerInitialisation(ContainerInitialisation containerInitialisation)
@@ -195,7 +245,7 @@ namespace XppInterpreter.Interpreter.Bytecode
                 constructor.Parameters[narg].Accept(this);
             }
 
-            Emit(new NewObject(constructor.ClassName, constructor.Parameters.Count, true));
+            Emit(new NewObject(constructor.ClassName, constructor.Parameters.Count, true, constructor.ResolvedClrType));
         }
 
         public void VisitAssignment(Assignment assignment)
@@ -203,6 +253,13 @@ namespace XppInterpreter.Interpreter.Bytecode
             EmitDebugSymbol(assignment);
 
             assignment.Expression.Accept(this);
+
+            // Static member assignment (ClassName::member = value)
+            if (assignment.Assignee.StaticCall && assignment.Assignee.Caller is Variable staticCaller)
+            {
+                Emit(new StaticStore(assignment.Assignee.Name, ((Word)staticCaller.Token).Lexeme, staticCaller.ClrTypeReference));
+                return;
+            }
 
             bool fromCaller = false;
 
@@ -368,6 +425,8 @@ namespace XppInterpreter.Interpreter.Bytecode
 
             var maxLoopScope = ReleaseScope();
 
+            int forStartIndex = _ss.Peek().Instructions.Count;
+
             if (_hasMaxIterations)
             {
                 Emit(new Push(Options.MaxLoopIterations));
@@ -380,7 +439,7 @@ namespace XppInterpreter.Interpreter.Bytecode
             EmitScope(loopScope);
             Emit(new Jump(-(maxLoopScope.Count + blockScope.Count + loopScope.Count + forScope.Count + 1)));
 
-            RecalculateLoopControlOffsets(loopScope.Instructions.First());
+            RecalculateLoopControlOffsets(loopScope.Instructions.First(), forStartIndex);
 
             Emit(new EndScope());
 
@@ -389,6 +448,19 @@ namespace XppInterpreter.Interpreter.Bytecode
         public void VisitNoReturnFunctionCall(NoReturnFunctionCall noReturnFunctionCall)
         {
             EmitDebugSymbol(noReturnFunctionCall);
+
+            // A statement-level constructor call (new MyClass();) discards the instance
+            if (noReturnFunctionCall.FunctionCall is Constructor constructor)
+            {
+                for (var narg = constructor.Parameters.Count - 1; narg >= 0; narg--)
+                {
+                    constructor.Parameters[narg].Accept(this);
+                }
+
+                Emit(new NewObject(constructor.ClassName, constructor.Parameters.Count, false, constructor.ResolvedClrType));
+                return;
+            }
+
             VisitFunctionCall(noReturnFunctionCall.FunctionCall, false);
         }
 
@@ -401,7 +473,120 @@ namespace XppInterpreter.Interpreter.Bytecode
                 statement.Accept(this);
             }
 
+            LinkClassExtensions();
+
             Emit(new EndScope());
+        }
+
+        private void LinkClassExtensions()
+        {
+            foreach (RuntimeClass runtimeClass in _declaredClasses)
+            {
+                runtimeClass.ExtensionMethods.Clear();
+                runtimeClass.ExtensionFields.Clear();
+                runtimeClass.ExtensionTarget = null;
+                runtimeClass.HasCompiledExtensionTarget = false;
+                runtimeClass.ExternalExtensionRoot = null;
+
+                foreach (RuntimeClassMethod method in runtimeClass.Methods)
+                {
+                    method.NextMethod = null;
+                    method.NextCallsNative = false;
+                    method.NativeTargetName = null;
+                }
+            }
+
+            foreach (RuntimeClass extensionClass in _declaredClasses.Where(runtimeClass =>
+                !string.IsNullOrEmpty(runtimeClass.ExtensionTargetName)))
+            {
+                RuntimeClass target = _declaredClasses.FirstOrDefault(runtimeClass =>
+                    string.Equals(runtimeClass.Name, extensionClass.ExtensionTargetName, System.StringComparison.OrdinalIgnoreCase));
+
+                extensionClass.ExtensionTarget = target;
+
+                if (target is null)
+                {
+                    extensionClass.HasCompiledExtensionTarget = true;
+                    continue;
+                }
+
+                foreach (RuntimeClassField extensionField in extensionClass.Fields.Where(field =>
+                    field.Access == AccessModifier.Public))
+                {
+                    target.ExtensionFields.Add(extensionField);
+                }
+
+                foreach (RuntimeClassMethod extensionMethod in extensionClass.Methods)
+                {
+                    if (string.Equals(extensionMethod.Name, "new", System.StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(extensionMethod.Name, "TypeNew", System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    RuntimeClassMethod original = target.FindMethod(extensionMethod.Name);
+
+                    if (original != null && original.IsStatic == extensionMethod.IsStatic)
+                    {
+                        target.ExtensionMethods.Add(extensionMethod);
+                    }
+                    else if (original is null && extensionMethod.Access == AccessModifier.Public)
+                    {
+                        // A public method added by an augmentation is part of the
+                        // target's effective class even though it has no next link.
+                        target.ExtensionMethods.Add(extensionMethod);
+                    }
+                }
+            }
+
+            foreach (RuntimeClass target in _declaredClasses)
+            {
+                foreach (var methodGroup in target.ExtensionMethods.GroupBy(method => method.Name, System.StringComparer.OrdinalIgnoreCase))
+                {
+                    List<RuntimeClassMethod> wrappers = methodGroup.ToList();
+                    RuntimeClassMethod original = target.FindMethod(methodGroup.Key);
+
+                    for (int index = 0; index < wrappers.Count; index++)
+                    {
+                        wrappers[index].NextMethod = original is null
+                            ? null
+                            : (index + 1 < wrappers.Count ? wrappers[index + 1] : original);
+                    }
+                }
+            }
+
+            // Link extensions whose target is a compiled AOS class/table. The
+            // original implementation is not bytecode; the innermost wrapper
+            // terminates in a native proxy call.
+            foreach (var targetGroup in _declaredClasses
+                .Where(runtimeClass => runtimeClass.HasCompiledExtensionTarget)
+                .GroupBy(runtimeClass => runtimeClass.ExtensionTargetName, System.StringComparer.OrdinalIgnoreCase))
+            {
+                RuntimeClass root = targetGroup.First();
+                foreach (RuntimeClass extensionClass in targetGroup)
+                {
+                    extensionClass.ExternalExtensionRoot = root;
+                }
+
+                var methods = targetGroup.SelectMany(runtimeClass => runtimeClass.Methods)
+                    .Where(method => !string.Equals(method.Name, "new", System.StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(method.Name, "TypeNew", System.StringComparison.OrdinalIgnoreCase));
+
+                foreach (var methodGroup in methods.GroupBy(
+                    method => (method.IsStatic ? "S:" : "I:") + method.Name,
+                    System.StringComparer.OrdinalIgnoreCase))
+                {
+                    List<RuntimeClassMethod> wrappers = methodGroup.ToList();
+                    bool wrapsNative = wrappers.Any(method => method.WrapsCompiledTarget);
+
+                    for (int index = 0; index < wrappers.Count; index++)
+                    {
+                        wrappers[index].NextMethod = index + 1 < wrappers.Count ? wrappers[index + 1] : null;
+                        wrappers[index].NextCallsNative = wrapsNative && index == wrappers.Count - 1;
+                        wrappers[index].NativeTargetName = targetGroup.Key;
+                    }
+                }
+            }
         }
 
         public void VisitIf(If @if)
@@ -464,6 +649,8 @@ namespace XppInterpreter.Interpreter.Bytecode
 
             var loopCheckScope = ReleaseScope();
 
+            int whileStartIndex = _ss.Peek().Instructions.Count;
+
             if (_hasMaxIterations)
             {
                 Emit(new Push(Options.MaxLoopIterations));
@@ -475,23 +662,31 @@ namespace XppInterpreter.Interpreter.Bytecode
             EmitScope(blockScope);
             Emit(new Jump(-(loopCheckScope.Count + blockScope.Count + expressionScope.Count) - 1));
 
-            RecalculateLoopControlOffsets(expressionScope.Instructions.First());
+            RecalculateLoopControlOffsets(expressionScope.Instructions.First(), whileStartIndex);
         }
 
-        private void RecalculateLoopControlOffsets(IInstruction jumpInstructionForContinue)
+        private void RecalculateLoopControlOffsets(IInstruction jumpInstructionForContinue, int fromIndex = 0)
         {
-            // Move the pending loop control jumps
-            foreach (LoopControl loopControl in _ss.Peek().Instructions.Where(i => i is LoopControl lc && lc.IsDirty))
+            // Move the pending loop control jumps. Only instructions emitted by the
+            // construct being finalized (index >= fromIndex) are stamped, so a break
+            // belonging to an enclosing loop that precedes a nested switch/loop in
+            // the same scope stays dirty for the enclosing loop's own recalculation.
+            var instructions = _ss.Peek().Instructions;
+
+            for (int index = fromIndex; index < instructions.Count; index++)
             {
+                if (!(instructions[index] is LoopControl loopControl) || !loopControl.IsDirty)
+                {
+                    continue;
+                }
+
                 if (loopControl.TokenType == TType.Break)
                 {
-                    int offset = _ss.Peek().Instructions.Count - _ss.Peek().Instructions.IndexOf(loopControl);
-                    loopControl.SetFinalOffset(offset);
+                    loopControl.SetFinalOffset(instructions.Count - index);
                 }
                 else if (loopControl.TokenType == TType.Continue && jumpInstructionForContinue != null)
                 {
-                    int offset = -(_ss.Peek().Instructions.IndexOf(loopControl) - _ss.Peek().Instructions.IndexOf(jumpInstructionForContinue));
-                    loopControl.SetFinalOffset(offset);
+                    loopControl.SetFinalOffset(-(index - instructions.IndexOf(jumpInstructionForContinue)));
                 }
             }
         }
@@ -511,10 +706,22 @@ namespace XppInterpreter.Interpreter.Bytecode
 
             int nArgs = functionCall.Parameters.Count;
 
+            if (functionCall is SuperCallExpression superCall)
+            {
+                Emit(new SuperCall(_currentRuntimeClass, superCall.MethodName, nArgs, allocate));
+                return;
+            }
+
+            if (functionCall is NextCallExpression)
+            {
+                Emit(new NextMethodCall(_currentRuntimeMethod, nArgs, allocate));
+                return;
+            }
+
             if (_declaredFunctions.Exists(f => f.Declaration.Name.ToLowerInvariant() == functionCall.Name.ToLowerInvariant()) && functionCall.Caller is null)
             {
                 var declaredFunctionRef = _declaredFunctions.First(f => f.Declaration.Name.ToLowerInvariant() == functionCall.Name.ToLowerInvariant());
-                Emit(new DeclaredFunctionCall(declaredFunctionRef, nArgs));
+                Emit(new DeclaredFunctionCall(declaredFunctionRef, nArgs, functionCall.ByRefArguments));
             }
             else if (functionCall.Intrinsical)
             {
@@ -526,13 +733,14 @@ namespace XppInterpreter.Interpreter.Bytecode
             }
             else if (functionCall.StaticCall)
             {
-                string callerName = ((Word)(functionCall.Caller as Variable).Token).Lexeme;
-                Emit(new StaticFunctionCall(functionCall.Name, nArgs, allocate, callerName));
+                var staticCaller = functionCall.Caller as Variable;
+                string callerName = ((Word)staticCaller.Token).Lexeme;
+                Emit(new StaticFunctionCall(functionCall.Name, nArgs, allocate, callerName, staticCaller.ClrTypeReference, functionCall.ByRefArguments));
             }
             else
             {
                 functionCall.Caller.Accept(this);
-                Emit(new InstanceFunctionCall(functionCall.Name, nArgs, allocate));
+                Emit(new InstanceFunctionCall(functionCall.Name, nArgs, allocate, functionCall.ByRefArguments));
             }
         }
 
@@ -549,7 +757,7 @@ namespace XppInterpreter.Interpreter.Bytecode
             ternary.Right.Accept(this);
             var rightScope = ReleaseScope();
 
-            Emit(new JumpIfFalse(leftScope.Count + 1 + 1 /*Jump instruction */));
+            Emit(new JumpIfFalse(leftScope.Count + 1 + 1 /*Jump instruction */, false));
             EmitScope(leftScope);
             Emit(new Jump(rightScope.Count + 1));
             EmitScope(rightScope);
@@ -568,6 +776,10 @@ namespace XppInterpreter.Interpreter.Bytecode
                 case TType.Minus:
                     Emit(new Push(-1));
                     Emit(new Arithmetic(TType.Star));
+                    break;
+
+                case TType.BinaryNot:
+                    Emit(new BinaryNot());
                     break;
             }
         }
@@ -594,7 +806,7 @@ namespace XppInterpreter.Interpreter.Bytecode
             else
             {
                 string callerName = (variable.Caller.Token as Word).Lexeme;
-                Emit(new StaticLoad(variable.Name, callerName, isArray));
+                Emit(new StaticLoad(variable.Name, callerName, isArray, (variable.Caller as Variable)?.ClrTypeReference));
             }
         }
 
@@ -614,7 +826,7 @@ namespace XppInterpreter.Interpreter.Bytecode
                 }
                 else
                 {
-                    Emit(new DefaultValue(variableDeclarations.DeclarationType.Lexeme));
+                    Emit(new DefaultValue(variableDeclarations.DeclarationType.Lexeme, variableDeclarations.DeclarationClrType));
                 }
 
                 Emit(new Store(declaration.Key.Lexeme, false, true, false, variableDeclarations.DeclarationType.Lexeme, variableDeclarations.DeclarationClrType));
@@ -634,50 +846,78 @@ namespace XppInterpreter.Interpreter.Bytecode
             @switch.Expression.Accept(this);
             var expressionScope = ReleaseScope();
 
-            var caseScopes = new Dictionary<ByteCodeGenerationScope, ByteCodeGenerationScope>();
+            var caseExpressionScopes = new List<ByteCodeGenerationScope>();
+            var caseStatementScopes = new List<ByteCodeGenerationScope>();
 
-            // Emit cases
-            foreach (var @case in @switch.Cases)
+            if (@switch.Cases != null)
             {
-                CreateScope();
-                EmitDebugSymbol(@case.Key);
-                @case.Key.Accept(this);
-                // delete all debug symbols that are created by the expression itself
-                DeleteAllDebugSymbolsInScope(true);
-                var caseExpressionScope = ReleaseScope();
-
-                CreateScope();
-                foreach (var caseStatement in @case.Value)
+                foreach (var @case in @switch.Cases)
                 {
-                    caseStatement.Accept(this);
-                }
-                var caseStatementsScope = ReleaseScope();
+                    CreateScope();
+                    EmitDebugSymbol(@case.Key);
+                    @case.Key.Accept(this);
+                    // delete all debug symbols that are created by the expression itself
+                    DeleteAllDebugSymbolsInScope(true);
+                    caseExpressionScopes.Add(ReleaseScope());
 
-                caseScopes.Add(caseExpressionScope, caseStatementsScope);
+                    CreateScope();
+                    foreach (var caseStatement in @case.Value)
+                    {
+                        caseStatement.Accept(this);
+                    }
+                    caseStatementScopes.Add(ReleaseScope());
+                }
             }
 
-            // Emit default
             CreateScope();
-            foreach (var defaultStatement in @switch.Default)
+            foreach (var defaultStatement in @switch.Default ?? Enumerable.Empty<Statement>())
             {
                 defaultStatement.Accept(this);
             }
             var defaultScope = ReleaseScope();
 
+            // Two-phase layout for X++ fall-through semantics: all case labels are
+            // tested first (switch value on the stack); a match jumps into a single
+            // linear statement region so execution falls through subsequent case
+            // bodies until a break
+            int switchStartIndex = _ss.Peek().Instructions.Count;
+
             Emit(new BeginScope());
 
             EmitScope(expressionScope);
 
-            foreach (var caseScope in caseScopes)
+            int caseCount = caseExpressionScopes.Count;
+            int dispatchLength = caseExpressionScopes.Sum(s => s.Count + 1) + 2; // + Pop + Jump-to-default
+            int totalStatements = caseStatementScopes.Sum(s => s.Count);
+
+            int emittedDispatch = 0;
+            int precedingStatements = 0;
+
+            for (int numCase = 0; numCase < caseCount; numCase++)
             {
-                EmitScope(caseScope.Key);
-                Emit(new Case(caseScope.Value.Count + 1));
-                EmitScope(caseScope.Value);
+                EmitScope(caseExpressionScopes[numCase]);
+                emittedDispatch += caseExpressionScopes[numCase].Count + 1;
+
+                int jumpPosition = emittedDispatch - 1;
+                int targetPosition = dispatchLength + precedingStatements;
+
+                Emit(new CaseJumpIfEqual(targetPosition - jumpPosition));
+
+                precedingStatements += caseStatementScopes[numCase].Count;
+            }
+
+            // No case matched: discard the switch value and run the default section
+            Emit(new Pop());
+            Emit(new Jump(dispatchLength + totalStatements - (dispatchLength - 1)));
+
+            foreach (var statementScope in caseStatementScopes)
+            {
+                EmitScope(statementScope);
             }
 
             EmitScope(defaultScope);
 
-            RecalculateLoopControlOffsets(null);
+            RecalculateLoopControlOffsets(null, switchStartIndex);
 
             Emit(new EndScope());
         }
@@ -717,7 +957,7 @@ namespace XppInterpreter.Interpreter.Bytecode
         public void VisitReturn(Parser.Return @return)
         {
             EmitDebugSymbol(@return);
-            @return.Expression.Accept(this);
+            @return.Expression?.Accept(this);
             Emit(new Return());
         }
 
@@ -746,13 +986,13 @@ namespace XppInterpreter.Interpreter.Bytecode
         public void VisitIs(Parser.Is @is)
         {
             @is.Expression.Accept(this);
-            Emit(new Is(@is.TypeName));
+            Emit(new Is(@is.TypeName, @is.ResolvedClrType));
         }
 
         public void VisitAs(Parser.As @as)
         {
             @as.Expression.Accept(this);
-            Emit(new As(@as.TypeName));
+            Emit(new As(@as.TypeName, @as.ResolvedClrType));
         }
 
         public void VisitTry(Try @try)
@@ -850,6 +1090,188 @@ namespace XppInterpreter.Interpreter.Bytecode
         {
             EmitDebugSymbol(retry);
             Emit(new Retry());
+        }
+
+        public void VisitTableField(TableField tableField)
+        {
+
+        }
+
+        public void VisitEventHandlerSubscription(EventHandlerSubscription subscription)
+        {
+            EmitDebugSymbol(subscription);
+            subscription.Delegate.Accept(this);
+
+            RefFunction refFunction = null;
+
+            if (subscription.EventHandler.Kind == Parser.EventHandlerKind.LocalFunction)
+            {
+                refFunction = _declaredFunctions.First(f => f.Declaration.Name.ToLowerInvariant() == subscription.EventHandler.FunctionName.ToLowerInvariant());
+            }
+
+            Emit(new EventSubscribe(
+                refFunction,
+                subscription.EventHandler.Kind,
+                subscription.EventHandler.FunctionName,
+                subscription.EventHandler.CallerName,
+                subscription.Unsubscribe));
+        }
+
+        public void VisitClassDeclaration(ClassDeclaration classDeclaration)
+        {
+            // Flatten interface names (including base interfaces of implemented
+            // interfaces) so runtime is/as checks see the whole closure
+            List<string> implementsClosure = classDeclaration.ImplementsNames;
+
+            if (classDeclaration.Info != null)
+            {
+                var interfaceNames = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+                classDeclaration.Info.CollectInterfaceNames(interfaceNames);
+                implementsClosure = interfaceNames.ToList();
+            }
+
+            var runtimeClass = new RuntimeClass
+            {
+                Name = classDeclaration.Name,
+                BaseClassName = classDeclaration.BaseClassName,
+                ImplementsNames = implementsClosure,
+                CompiledInterfaces = classDeclaration.Info?.CompiledInterfaces.ToList() ?? new List<System.Type>(),
+                IsAbstract = classDeclaration.IsAbstract,
+                IsFinal = classDeclaration.IsFinal,
+                IsStatic = classDeclaration.IsStatic,
+                ExtensionTargetName = classDeclaration.ExtensionTargetName,
+                DelegateNames = classDeclaration.Delegates.Select(d => d.Name).ToList(),
+                DelegateDeclarations = classDeclaration.Delegates.ToList(),
+                Attributes = classDeclaration.Attributes.ToList(),
+                HasCompiledBase = classDeclaration.Info?.CompiledBaseType != null,
+                HasCompiledExtensionTarget = classDeclaration.Info?.ExtensionTarget?.CompiledTypeDescriptor != null,
+                CompiledExtensionTargetKind = classDeclaration.Info?.ExtensionTarget?.CompiledTypeDescriptor?.Kind ??
+                    Interpreter.Metadata.AosTypeKind.Unknown,
+            };
+
+            if (classDeclaration.BaseClassName != null)
+            {
+                runtimeClass.BaseClass = _declaredClasses.FirstOrDefault(c =>
+                    string.Equals(c.Name, classDeclaration.BaseClassName, System.StringComparison.OrdinalIgnoreCase));
+            }
+
+            _declaredClasses.Add(runtimeClass);
+
+            if (classDeclaration.Info != null)
+            {
+                foreach (var field in classDeclaration.Info.Fields)
+                {
+                    runtimeClass.Fields.Add(new RuntimeClassField
+                    {
+                        Name = field.Name,
+                        TypeName = field.Type?.Lexeme,
+                        ClrType = field.ClrType,
+                        IsStatic = field.IsStatic,
+                        IsConst = field.IsConst,
+                        Access = field.Access,
+                        DeclaringClass = runtimeClass,
+                        Attributes = field.Attributes,
+                    });
+                }
+            }
+
+            // Field initializers are compiled out-of-line and run at instantiation
+            // (instance) or on first access (static)
+            foreach (var field in classDeclaration.Fields)
+            {
+                CreateScope();
+                field.Declaration.Accept(this);
+                var fieldScope = ReleaseScope();
+
+                var target = field.Modifiers.IsStatic ? runtimeClass.StaticFieldInitInstructions : runtimeClass.FieldInitInstructions;
+                target.AddRange(fieldScope.Instructions);
+            }
+
+            // Method bodies are compiled out-of-line, like declared functions
+            foreach (var method in classDeclaration.Methods)
+            {
+                var runtimeMethod = new RuntimeClassMethod
+                {
+                    Name = method.Name,
+                    IsStatic = method.Modifiers.IsStatic,
+                    IsAbstract = method.Modifiers.IsAbstract,
+                    IsFinal = method.Modifiers.IsFinal,
+                    Access = method.Modifiers.Access ?? (method.IsConstructor ? Parser.AccessModifier.Public : Parser.AccessModifier.Public),
+                    ReturnType = method.ReturnType,
+                    Parameters = method.Parameters,
+                    DeclaringClass = runtimeClass,
+                    RequiredParameterCount = method.ParameterDefaults.Count(value => value is null),
+                    Attributes = method.Attributes,
+                    WrapsCompiledTarget = classDeclaration.Info?.ExtensionTarget?.CompiledTypeDescriptor != null &&
+                        classDeclaration.Info.ExtensionTarget.FindMethod(method.Name, walkBaseChain: false) != null,
+                };
+
+                foreach (var defaultExpression in method.ParameterDefaults)
+                {
+                    if (defaultExpression is Constant constant)
+                    {
+                        object value = null;
+
+                        if (constant.Token is BaseType baseType)
+                        {
+                            value = baseType.Value;
+                        }
+                        else if (constant.Token.TokenType == TType.True)
+                        {
+                            value = true;
+                        }
+                        else if (constant.Token.TokenType == TType.False)
+                        {
+                            value = false;
+                        }
+
+                        runtimeMethod.ParameterDefaults.Add(value);
+                        runtimeMethod.ParameterHasDefault.Add(true);
+                    }
+                    else
+                    {
+                        runtimeMethod.ParameterDefaults.Add(null);
+                        runtimeMethod.ParameterHasDefault.Add(false);
+                    }
+                }
+
+                runtimeClass.Methods.Add(runtimeMethod);
+            }
+
+            // Bodies are compiled after all methods are registered so calls between
+            // methods of the class resolve regardless of declaration order
+            for (int numMethod = 0; numMethod < classDeclaration.Methods.Count; numMethod++)
+            {
+                var method = classDeclaration.Methods[numMethod];
+                var runtimeMethod = runtimeClass.Methods[numMethod];
+
+                // Abstract methods have no body to compile
+                if (method.Block is null)
+                {
+                    continue;
+                }
+
+                var currentClassSave = _currentRuntimeClass;
+                var currentMethodSave = _currentRuntimeMethod;
+                _currentRuntimeClass = runtimeClass;
+                _currentRuntimeMethod = runtimeMethod;
+
+                CreateScope();
+                method.Block.Accept(this);
+                runtimeMethod.Instructions = ReleaseScope().Instructions;
+
+                _currentRuntimeClass = currentClassSave;
+                _currentRuntimeMethod = currentMethodSave;
+            }
+
+            foreach (RuntimeClassMethod attributedMethod in runtimeClass.Methods)
+            {
+                foreach (XppAttributeDeclaration attribute in attributedMethod.Attributes.Where(candidate =>
+                    AttributedEventSubscribe.IsEventAttribute(candidate.Name)))
+                {
+                    Emit(new AttributedEventSubscribe(attributedMethod, attribute));
+                }
+            }
         }
     }
 }

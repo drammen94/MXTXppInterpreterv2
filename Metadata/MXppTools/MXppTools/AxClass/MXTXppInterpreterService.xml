@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppInterpreterService</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Authenticated custom-service facade for immediate and durable interpreted X++.
+/// The interpreter is already loaded in AOS; this operation never invokes xppc,
+/// package deployment, database synchronization, or SysTest.
+/// </summary>
+public final class MXTXppInterpreterService
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>execute</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Parses, compiles to interpreter bytecode, and executes source in the current
+    /// AOS request. Database work is always aborted before the response is returned.
+    /// </summary>
+    [SysEntryPointAttribute(true)]
+    public MXTXppInterpreterExecutionResponse execute(MXTXppInterpreterExecutionRequest _request)
+    {
+        return MXTXppInterpreterExecutor::executeFast(_request);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>deployModule</Name>
+				<Source><![CDATA[
+    /// <summary>Creates an immutable staged module version and optionally activates it.</summary>
+    [SysEntryPointAttribute(true)]
+    public MXTXppInterpreterModuleResponse deployModule(MXTXppInterpreterModuleRequest _request)
+    {
+        return MXTXppInterpreterModuleRegistry::deploy(_request);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>activateModule</Name>
+				<Source><![CDATA[
+    /// <summary>Validates, compiles, caches, and atomically activates a staged version.</summary>
+    [SysEntryPointAttribute(true)]
+    public MXTXppInterpreterModuleResponse activateModule(MXTXppInterpreterModuleRequest _request)
+    {
+        return MXTXppInterpreterModuleRegistry::activate(_request);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>rollbackModule</Name>
+				<Source><![CDATA[
+    /// <summary>Atomically activates a prior immutable version.</summary>
+    [SysEntryPointAttribute(true)]
+    public MXTXppInterpreterModuleResponse rollbackModule(MXTXppInterpreterModuleRequest _request)
+    {
+        return MXTXppInterpreterModuleRegistry::rollback(_request);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>executeModule</Name>
+				<Source><![CDATA[
+    /// <summary>Executes an active or explicitly selected module version with database rollback.</summary>
+    [SysEntryPointAttribute(true)]
+    public MXTXppInterpreterExecutionResponse executeModule(MXTXppInterpreterModuleRequest _request)
+    {
+        return MXTXppInterpreterModuleRegistry::execute(_request);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getModule</Name>
+				<Source><![CDATA[
+    /// <summary>Returns source and version history for a module.</summary>
+    [SysEntryPointAttribute(true)]
+    public MXTXppInterpreterModuleResponse getModule(MXTXppInterpreterModuleRequest _request)
+    {
+        return MXTXppInterpreterModuleRegistry::get(_request);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>listModules</Name>
+				<Source><![CDATA[
+    /// <summary>Lists all durable interpreted modules and their active/latest versions.</summary>
+    [SysEntryPointAttribute(true)]
+    public MXTXppInterpreterModuleListResponse listModules()
+    {
+        return MXTXppInterpreterModuleRegistry::list();
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

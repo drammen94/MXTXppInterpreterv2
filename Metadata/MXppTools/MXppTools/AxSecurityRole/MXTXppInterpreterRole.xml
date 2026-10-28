@@ -5,6 +5,13 @@
 	<Label>@MXT:XppInterpreterExecutorRole</Label>
 	<DirectAccessPermissions />
 	<Duties />
-	<Privileges />
+	<Privileges>
+		<AxSecurityPrivilegeReference>
+			<Name>MXTXppInterpreterFastExecute</Name>
+		</AxSecurityPrivilegeReference>
+		<AxSecurityPrivilegeReference>
+			<Name>MXTXppInterpreterScriptExecutionLogMaintain</Name>
+		</AxSecurityPrivilegeReference>
+	</Privileges>
 	<SubRoles />
 </AxSecurityRole>

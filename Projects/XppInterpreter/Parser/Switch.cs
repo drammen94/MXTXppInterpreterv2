@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Diagnostics;
 using XppInterpreter.Interpreter;
 
@@ -7,16 +7,22 @@ namespace XppInterpreter.Parser
     public class Switch : Statement
     {
         public Expression Expression { get; }
-        public IDictionary<Expression, List<Statement>> Cases { get; }
+
+        /// <summary>
+        /// Case labels in declaration order (order matters for fall-through)
+        /// </summary>
+        public List<KeyValuePair<Expression, List<Statement>>> Cases { get; }
+
         public List<Statement> Default { get; }
+
         public Switch(
             Expression switchExpression,
-            IDictionary<Expression, List<Statement>> cases,
+            List<KeyValuePair<Expression, List<Statement>>> cases,
             List<Statement> defaultStatement,
             SourceCodeBinding sourceCodeBinding, SourceCodeBinding debuggeableCodeBinding) : base(sourceCodeBinding, debuggeableCodeBinding)
         {
             Expression = switchExpression;
-            Cases = cases ?? new Dictionary<Expression, List<Statement>>();
+            Cases = cases ?? new List<KeyValuePair<Expression, List<Statement>>>();
             Default = defaultStatement ?? new List<Statement>();
         }
 

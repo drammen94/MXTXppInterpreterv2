@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppInterpreterExecutionResponse</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Result contract for rollback-only, resident X++ interpreter execution.
+/// Timings are measured inside AOS and expressed in microseconds.
+/// </summary>
+[DataContract]
+public final class MXTXppInterpreterExecutionResponse
+{
+    boolean success;
+    boolean rolledBack;
+    str requestId;
+    str output;
+    str error;
+    int instructionCount;
+    int64 parseMicroseconds;
+    int64 compileMicroseconds;
+    int64 executeMicroseconds;
+    int64 totalMicroseconds;
+    str moduleName;
+    int moduleVersion;
+    boolean cacheHit;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>parmSuccess</Name>
+				<Source><![CDATA[
+    [DataMember("Success")]
+    public boolean parmSuccess(boolean _success = success)
+    {
+        success = _success;
+        return success;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmRolledBack</Name>
+				<Source><![CDATA[
+    [DataMember("RolledBack")]
+    public boolean parmRolledBack(boolean _rolledBack = rolledBack)
+    {
+        rolledBack = _rolledBack;
+        return rolledBack;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmRequestId</Name>
+				<Source><![CDATA[
+    [DataMember("RequestId")]
+    public str parmRequestId(str _requestId = requestId)
+    {
+        requestId = _requestId;
+        return requestId;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmOutput</Name>
+				<Source><![CDATA[
+    [DataMember("Output")]
+    public str parmOutput(str _output = output)
+    {
+        output = _output;
+        return output;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmError</Name>
+				<Source><![CDATA[
+    [DataMember("Error")]
+    public str parmError(str _error = error)
+    {
+        error = _error;
+        return error;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmInstructionCount</Name>
+				<Source><![CDATA[
+    [DataMember("InstructionCount")]
+    public int parmInstructionCount(int _instructionCount = instructionCount)
+    {
+        instructionCount = _instructionCount;
+        return instructionCount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmParseMicroseconds</Name>
+				<Source><![CDATA[
+    [DataMember("ParseMicroseconds")]
+    public int64 parmParseMicroseconds(int64 _parseMicroseconds = parseMicroseconds)
+    {
+        parseMicroseconds = _parseMicroseconds;
+        return parseMicroseconds;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCompileMicroseconds</Name>
+				<Source><![CDATA[
+    [DataMember("CompileMicroseconds")]
+    public int64 parmCompileMicroseconds(int64 _compileMicroseconds = compileMicroseconds)
+    {
+        compileMicroseconds = _compileMicroseconds;
+        return compileMicroseconds;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmExecuteMicroseconds</Name>
+				<Source><![CDATA[
+    [DataMember("ExecuteMicroseconds")]
+    public int64 parmExecuteMicroseconds(int64 _executeMicroseconds = executeMicroseconds)
+    {
+        executeMicroseconds = _executeMicroseconds;
+        return executeMicroseconds;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmTotalMicroseconds</Name>
+				<Source><![CDATA[
+    [DataMember("TotalMicroseconds")]
+    public int64 parmTotalMicroseconds(int64 _totalMicroseconds = totalMicroseconds)
+    {
+        totalMicroseconds = _totalMicroseconds;
+        return totalMicroseconds;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmModuleName</Name>
+				<Source><![CDATA[
+    [DataMember("ModuleName")]
+    public str parmModuleName(str _moduleName = moduleName)
+    {
+        moduleName = _moduleName;
+        return moduleName;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmModuleVersion</Name>
+				<Source><![CDATA[
+    [DataMember("ModuleVersion")]
+    public int parmModuleVersion(int _moduleVersion = moduleVersion)
+    {
+        moduleVersion = _moduleVersion;
+        return moduleVersion;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmCacheHit</Name>
+				<Source><![CDATA[
+    [DataMember("CacheHit")]
+    public boolean parmCacheHit(boolean _cacheHit = cacheHit)
+    {
+        cacheHit = _cacheHit;
+        return cacheHit;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

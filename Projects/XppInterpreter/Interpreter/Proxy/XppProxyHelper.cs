@@ -13,7 +13,13 @@ namespace XppInterpreter.Interpreter.Proxy
 
         public static object CallIntrinsicFunction(IIntrinsicFunctionProvider provider, string name, object[] parameters)
         {
-            var method = provider.GetType().GetMethods().FirstOrDefault(m => m.Name.ToLowerInvariant() == name.ToLowerInvariant());
+            var method = typeof(IIntrinsicFunctionProvider).GetMethods()
+                .FirstOrDefault(m => string.Equals(m.Name, name, System.StringComparison.OrdinalIgnoreCase));
+
+            if (method is null)
+            {
+                throw new System.MissingMethodException(typeof(IIntrinsicFunctionProvider).FullName, name);
+            }
 
             return method.Invoke(provider, parameters);
         }

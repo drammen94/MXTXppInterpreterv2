@@ -31,7 +31,7 @@ namespace XppInterpreter.Interpreter.Bytecode
             return arguments;
         }
 
-        public void Execute(RuntimeContext context)
+        public virtual void Execute(RuntimeContext context)
         {
             object returnValue;
 

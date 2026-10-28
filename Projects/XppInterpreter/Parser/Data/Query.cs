@@ -6,6 +6,7 @@ namespace XppInterpreter.Parser.Data
     {
         public bool ForceSelectOrder { get; set; }
         public string Index { get; set; }
+        public bool IndexIsHint { get; set; }
         public bool GenerateOnly { get; set; }
         public bool FirstFast { get; set; }
         public bool FirstOnly { get; set; }

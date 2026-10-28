@@ -33,6 +33,8 @@ public class MXTExecuteFormDialog extends FormRun
 
         EmitGlobalTtsAbort.checked(globalParameters.EmitGlobalTtsAbort);
         MaxLoopIterations.value(globalParameters.MaxLoopIteratations);
+        MaxInstructions.value(globalParameters.MaxInstructions);
+        MaxExecutionMilliseconds.value(globalParameters.MaxExecutionMilliseconds);
     }
 
 ]]></Source>
@@ -46,6 +48,8 @@ public class MXTExecuteFormDialog extends FormRun
 
         executionParameters.EmitGlobalTtsAbort  = EmitGlobalTtsAbort.checked() ? NoYes::Yes : NoYes::No;
         executionParameters.MaxLoopIteratations = MaxLoopIterations.value();
+        executionParameters.MaxInstructions = MaxInstructions.value();
+        executionParameters.MaxExecutionMilliseconds = MaxExecutionMilliseconds.value();
 
         return executionParameters;
     }
@@ -178,6 +182,24 @@ public class MXTExecuteFormDialog extends FormRun
 								<FormControlExtension
 									i:nil="true" />
 								<Label>@MXT:MaxLoopIterations</Label>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormIntegerControl">
+								<Name>MaxInstructions</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Integer</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Label>Maximum interpreter instructions</Label>
+							</AxFormControl>
+							<AxFormControl xmlns=""
+								i:type="AxFormIntegerControl">
+								<Name>MaxExecutionMilliseconds</Name>
+								<AutoDeclaration>Yes</AutoDeclaration>
+								<Type>Integer</Type>
+								<FormControlExtension
+									i:nil="true" />
+								<Label>Maximum execution time (milliseconds)</Label>
 							</AxFormControl>
 						</Controls>
 						<Caption>@MXT:ExecutionParameters</Caption>

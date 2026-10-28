@@ -26,6 +26,10 @@ public class MXTXppInterpreterParameters extends common
 
         if (!parameter && !parameter.isTmp())
         {
+            parameter.EmitGlobalTtsAbort = NoYes::Yes;
+            parameter.MaxLoopIteratations = 100000;
+            parameter.MaxInstructions = 1000000;
+            parameter.MaxExecutionMilliseconds = 300000;
             parameter.insert();
         }
 
@@ -108,6 +112,16 @@ public class MXTXppInterpreterParameters extends common
 			i:type="AxTableFieldInt">
 			<Name>MaxLoopIteratations</Name>
 			<Label>@MXT:MaxLoopIterations</Label>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldInt">
+			<Name>MaxInstructions</Name>
+			<Label>Maximum interpreter instructions</Label>
+		</AxTableField>
+		<AxTableField xmlns=""
+			i:type="AxTableFieldInt">
+			<Name>MaxExecutionMilliseconds</Name>
+			<Label>Maximum execution time (milliseconds)</Label>
 		</AxTableField>
 		<AxTableField xmlns=""
 			i:type="AxTableFieldEnum">

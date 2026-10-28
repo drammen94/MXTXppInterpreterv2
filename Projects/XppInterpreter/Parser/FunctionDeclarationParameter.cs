@@ -10,12 +10,14 @@ namespace XppInterpreter.Parser
         public Word DeclarationType { get; }
         public System.Type DeclarationClrType { get; }
         public string Name { get; }
+        public bool IsArray { get; }
 
-        public FunctionDeclarationParameter(Word declarationType, System.Type clrType, string name, SourceCodeBinding sourceCodeBinding)
+        public FunctionDeclarationParameter(Word declarationType, System.Type clrType, string name, SourceCodeBinding sourceCodeBinding, bool isArray = false)
         {
             DeclarationType = declarationType;
             Name = name;
             DeclarationClrType = clrType;
+            IsArray = isArray;
         }
     }
 }

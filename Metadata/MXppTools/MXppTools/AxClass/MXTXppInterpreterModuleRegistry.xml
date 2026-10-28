@@ -1,0 +1,805 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppInterpreterModuleRegistry</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Versioned persistent module registry for the resident X++ interpreter.
+///
+/// Source and immutable version metadata are stored in the platform-owned
+/// SysLastValue document store, so adding an interpreted module does not add an
+/// SQL table or require database synchronization. Compiled bytecode is cached per
+/// AOS process and is reconstructed from persisted source after an AOS recycle.
+/// </summary>
+internal final class MXTXppInterpreterModuleRegistry
+{
+    private const str StorageElement = 'MXTModuleRegistry';
+    private const str CatalogKey = '__catalog__';
+    private const int StorageFormat = 1;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>normalizeName</Name>
+				<Source><![CDATA[
+    private static str normalizeName(str _moduleName)
+    {
+        str moduleName = strLRTrim(_moduleName);
+        if (!moduleName)
+        {
+            throw error('ModuleName is required.');
+        }
+        if (strLen(moduleName) > 40)
+        {
+            throw error('ModuleName cannot exceed 40 characters.');
+        }
+        if (!System.Text.RegularExpressions.Regex::IsMatch(moduleName, '^[A-Za-z_][A-Za-z0-9_.-]*$'))
+        {
+            throw error('ModuleName must start with a letter or underscore and contain only letters, numbers, underscore, dot, or hyphen.');
+        }
+        return moduleName;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>sourceHash</Name>
+				<Source><![CDATA[
+    private static str sourceHash(str _sourceCode)
+    {
+        var bytes = System.Text.Encoding::UTF8.GetBytes(_sourceCode);
+        var sha = System.Security.Cryptography.SHA256::Create();
+        var hash = sha.ComputeHash(bytes);
+        return strLwr(System.BitConverter::ToString(hash).Replace('-', ''));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>findStorage</Name>
+				<Source><![CDATA[
+    private static SysLastValue findStorage(str _key, boolean _forUpdate = false)
+    {
+        SysLastValue storage;
+        if (_forUpdate)
+        {
+            select firstonly forupdate storage
+                where storage.Company == ''
+                   && storage.UserId == ''
+                   && storage.RecordType == UtilElementType::Class
+                   && storage.ElementName == StorageElement
+                   && storage.DesignName == _key
+                   && storage.IsKernel == NoYes::No;
+        }
+        else
+        {
+            select firstonly storage
+                where storage.Company == ''
+                   && storage.UserId == ''
+                   && storage.RecordType == UtilElementType::Class
+                   && storage.ElementName == StorageElement
+                   && storage.DesignName == _key
+                   && storage.IsKernel == NoYes::No;
+        }
+        return storage;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>unpackStorage</Name>
+				<Source><![CDATA[
+    private static container unpackStorage(SysLastValue _storage)
+    {
+        if (!_storage.RecId || !_storage.Document)
+        {
+            return conNull();
+        }
+        return ContainerHelper::deserialize(_storage.Document);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>writeStorage</Name>
+				<Source><![CDATA[
+    private static void writeStorage(SysLastValue _storage, str _key, container _value)
+    {
+        _storage.Company = '';
+        _storage.UserId = '';
+        _storage.RecordType = UtilElementType::Class;
+        _storage.ElementName = StorageElement;
+        _storage.DesignName = _key;
+        _storage.IsKernel = NoYes::No;
+        _storage.Value = conNull();
+        _storage.Document = ContainerHelper::serialize(_value);
+        _storage.write();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>readModule</Name>
+				<Source><![CDATA[
+    private static container readModule(str _moduleName)
+    {
+        return MXTXppInterpreterModuleRegistry::unpackStorage(
+            MXTXppInterpreterModuleRegistry::findStorage(_moduleName));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>findVersion</Name>
+				<Source><![CDATA[
+    private static container findVersion(container _module, int _version)
+    {
+        container versions = conPeek(_module, 5);
+        for (int versionPosition = 1; versionPosition <= conLen(versions); versionPosition++)
+        {
+            container versionRecord = conPeek(versions, versionPosition);
+            if (conPeek(versionRecord, 1) == _version)
+            {
+                return versionRecord;
+            }
+        }
+        return conNull();
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parseOrThrow</Name>
+				<Source><![CDATA[
+    private static XppInterpreter.Parser.Program parseOrThrow(str _sourceCode, str _label)
+    {
+        XppInterpreter.Parser.ParseResult result = MXTXppInterpreterExecutor::parse(_sourceCode);
+        if (!result.IsCorrect)
+        {
+            str messages;
+            System.Collections.IEnumerator errors = result.Errors.GetEnumerator();
+            while (errors.MoveNext())
+            {
+                XppInterpreter.Parser.ParseError parseError = errors.Current;
+                messages += (messages ? '\n' : '') + parseError.Message;
+            }
+            throw error(strFmt('%1 did not validate: %2', _label, messages));
+        }
+        return result.AST as XppInterpreter.Parser.Program;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>resolveDependencies</Name>
+				<Source><![CDATA[
+    private static container resolveDependencies(str _moduleName, List _dependencies)
+    {
+        container resolved;
+        Set seen = new Set(Types::String);
+        if (!_dependencies)
+        {
+            return resolved;
+        }
+
+        ListEnumerator iterator = _dependencies.getEnumerator();
+        while (iterator.moveNext())
+        {
+            str specification = strLRTrim(iterator.current());
+            if (!specification)
+            {
+                continue;
+            }
+
+            int separator = strScan(specification, '@', 1, strLen(specification));
+            str dependencyName = separator ? subStr(specification, 1, separator - 1) : specification;
+            int dependencyVersion = separator ? str2Int(subStr(specification, separator + 1, strLen(specification))) : 0;
+            dependencyName = MXTXppInterpreterModuleRegistry::normalizeName(dependencyName);
+
+            if (strLwr(dependencyName) == strLwr(_moduleName))
+            {
+                throw error(strFmt('Module %1 cannot depend on itself.', _moduleName));
+            }
+            if (seen.in(strLwr(dependencyName)))
+            {
+                throw error(strFmt('Dependency %1 is listed more than once.', dependencyName));
+            }
+
+            container dependencyModule = MXTXppInterpreterModuleRegistry::readModule(dependencyName);
+            if (!dependencyModule)
+            {
+                throw error(strFmt('Dependency module %1 does not exist.', dependencyName));
+            }
+            if (!dependencyVersion)
+            {
+                dependencyVersion = conPeek(dependencyModule, 3);
+            }
+            if (!dependencyVersion || !MXTXppInterpreterModuleRegistry::findVersion(dependencyModule, dependencyVersion))
+            {
+                throw error(strFmt('Dependency %1 has no available version %2.', dependencyName, dependencyVersion));
+            }
+
+            container dependencyPair = [dependencyName, dependencyVersion];
+            resolved += [dependencyPair];
+            seen.add(strLwr(dependencyName));
+        }
+        return resolved;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dependencyText</Name>
+				<Source><![CDATA[
+    private static str dependencyText(container _dependencies)
+    {
+        str result;
+        for (int dependencyPosition = 1; dependencyPosition <= conLen(_dependencies); dependencyPosition++)
+        {
+            container pair = conPeek(_dependencies, dependencyPosition);
+            result += (result ? ',' : '') + strFmt('%1@%2', conPeek(pair, 1), conPeek(pair, 2));
+        }
+        return result;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>collectDependencies</Name>
+				<Source><![CDATA[
+    private static void collectDependencies(
+        str _rootModule,
+        container _versionRecord,
+        XppInterpreter.Interpreter.XppInterpreterDependencyCollection _collection,
+        Set _visiting,
+        Set _added)
+    {
+        container dependencies = conPeek(_versionRecord, 3);
+        for (int dependencyPosition = 1; dependencyPosition <= conLen(dependencies); dependencyPosition++)
+        {
+            container pair = conPeek(dependencies, dependencyPosition);
+            str dependencyName = conPeek(pair, 1);
+            int dependencyVersion = conPeek(pair, 2);
+            str dependencyKey = strLwr(strFmt('%1@%2', dependencyName, dependencyVersion));
+
+            if (strLwr(dependencyName) == strLwr(_rootModule))
+            {
+                throw error(strFmt('Dependency graph for %1 returns to the same module through %2.', _rootModule, dependencyKey));
+            }
+            if (_visiting.in(dependencyKey))
+            {
+                throw error(strFmt('Circular dependency detected at %1.', dependencyKey));
+            }
+            if (_added.in(dependencyKey))
+            {
+                continue;
+            }
+
+            container dependencyModule = MXTXppInterpreterModuleRegistry::readModule(dependencyName);
+            container dependencyRecord = MXTXppInterpreterModuleRegistry::findVersion(dependencyModule, dependencyVersion);
+            if (!dependencyRecord)
+            {
+                throw error(strFmt('Pinned dependency %1 is missing.', dependencyKey));
+            }
+
+            _visiting.add(dependencyKey);
+            MXTXppInterpreterModuleRegistry::collectDependencies(
+                _rootModule, dependencyRecord, _collection, _visiting, _added);
+            _visiting.remove(dependencyKey);
+
+            _collection.Add(MXTXppInterpreterModuleRegistry::parseOrThrow(
+                conPeek(dependencyRecord, 2), dependencyKey));
+            _added.add(dependencyKey);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>getCompiled</Name>
+				<Source><![CDATA[
+    private static MXTXppInterpreterCompiledModule getCompiled(
+        str _moduleName,
+        container _versionRecord)
+    {
+        MXTXppInterpreterCompiledModule result = new MXTXppInterpreterCompiledModule();
+        int version = conPeek(_versionRecord, 1);
+        str cacheKey = strLwr(strFmt('%1@%2@%3', _moduleName, version, conPeek(_versionRecord, 4)));
+
+        XppInterpreter.Interpreter.Bytecode.ByteCode cachedByteCode =
+            XppInterpreter.Interpreter.Bytecode.ResidentByteCodeCache::Get(cacheKey);
+        if (cachedByteCode)
+        {
+            result.parmByteCode(cachedByteCode);
+            result.parmCacheHit(true);
+            return result;
+        }
+
+        System.Diagnostics.Stopwatch parseWatch = System.Diagnostics.Stopwatch::StartNew();
+        XppInterpreter.Interpreter.XppInterpreterDependencyCollection dependencies =
+            new XppInterpreter.Interpreter.XppInterpreterDependencyCollection();
+        Set visiting = new Set(Types::String);
+        Set added = new Set(Types::String);
+        visiting.add(strLwr(strFmt('%1@%2', _moduleName, version)));
+        MXTXppInterpreterModuleRegistry::collectDependencies(
+            _moduleName, _versionRecord, dependencies, visiting, added);
+        XppInterpreter.Parser.Program program = MXTXppInterpreterModuleRegistry::parseOrThrow(
+            conPeek(_versionRecord, 2), strFmt('%1@%2', _moduleName, version));
+        parseWatch.Stop();
+        result.parmParseMicroseconds(MXTXppInterpreterExecutor::elapsedMicroseconds(parseWatch));
+
+        System.Diagnostics.Stopwatch compileWatch = System.Diagnostics.Stopwatch::StartNew();
+        XppInterpreter.Interpreter.Bytecode.ByteCode byteCode =
+            MXTXppInterpreterExecutor::compileModule(program, dependencies);
+        compileWatch.Stop();
+        result.parmCompileMicroseconds(MXTXppInterpreterExecutor::elapsedMicroseconds(compileWatch));
+        result.parmByteCode(byteCode);
+        XppInterpreter.Interpreter.Bytecode.ResidentByteCodeCache::Put(cacheKey, byteCode);
+        return result;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>fillResponse</Name>
+				<Source><![CDATA[
+    private static void fillResponse(
+        MXTXppInterpreterModuleResponse _response,
+        container _module,
+        container _versionRecord)
+    {
+        int activeVersion = conPeek(_module, 3);
+        int version = conPeek(_versionRecord, 1);
+        _response.parmModuleName(conPeek(_module, 2));
+        _response.parmVersion(version);
+        _response.parmActiveVersion(activeVersion);
+        _response.parmState(version == activeVersion ? 'Active' : 'Staged');
+        _response.parmSourceCode(conPeek(_versionRecord, 2));
+        _response.parmSourceHash(conPeek(_versionRecord, 4));
+        _response.parmDeployedBy(conPeek(_versionRecord, 5));
+        _response.parmDeployedAt(conPeek(_versionRecord, 6));
+        _response.parmInstructionCount(conPeek(_versionRecord, 7));
+
+        List dependencyList = new List(Types::String);
+        container dependencies = conPeek(_versionRecord, 3);
+        for (int dependencyIndex = 1; dependencyIndex <= conLen(dependencies); dependencyIndex++)
+        {
+            container pair = conPeek(dependencies, dependencyIndex);
+            dependencyList.addEnd(strFmt('%1@%2', conPeek(pair, 1), conPeek(pair, 2)));
+        }
+        _response.parmDependencies(dependencyList);
+
+        List versionList = new List(Types::String);
+        container versions = conPeek(_module, 5);
+        for (int versionIndex = 1; versionIndex <= conLen(versions); versionIndex++)
+        {
+            container item = conPeek(versions, versionIndex);
+            int itemVersion = conPeek(item, 1);
+            versionList.addEnd(strFmt('%1|%2|%3|%4|%5|%6',
+                itemVersion,
+                itemVersion == activeVersion ? 'Active' : 'Staged',
+                conPeek(item, 4),
+                conPeek(item, 5),
+                conPeek(item, 6),
+                MXTXppInterpreterModuleRegistry::dependencyText(conPeek(item, 3))));
+        }
+        _response.parmVersions(versionList);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>errorText</Name>
+				<Source><![CDATA[
+    private static str errorText(str _fallback)
+    {
+        System.Exception clrException = CLRInterop::getLastException();
+        if (clrException)
+        {
+            return clrException.ToString();
+        }
+        return _fallback;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>deploy</Name>
+				<Source><![CDATA[
+    public static MXTXppInterpreterModuleResponse deploy(MXTXppInterpreterModuleRequest _request)
+    {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+        MXTXppInterpreterModuleResponse response = new MXTXppInterpreterModuleResponse();
+        try
+        {
+            if (!_request)
+            {
+                throw error('A module request is required.');
+            }
+            if (appl.ttsLevel() != 0)
+            {
+                throw error('Module deployment requires TTS level zero.');
+            }
+
+            str moduleName = MXTXppInterpreterModuleRegistry::normalizeName(_request.parmModuleName());
+            str sourceCode = _request.parmSourceCode();
+            if (!sourceCode)
+            {
+                throw error('SourceCode is required.');
+            }
+            if (strLen(sourceCode) > 1000000)
+            {
+                throw error('SourceCode exceeds the 1,000,000 character module limit.');
+            }
+
+            // Reject invalid source before writing a staged version.
+            MXTXppInterpreterModuleRegistry::parseOrThrow(sourceCode, moduleName);
+            container resolvedDependencies = MXTXppInterpreterModuleRegistry::resolveDependencies(
+                moduleName, _request.parmDependencies());
+            str hash = MXTXppInterpreterModuleRegistry::sourceHash(sourceCode);
+
+            SysLastValue moduleStorage;
+            SysLastValue catalogStorage;
+            container module;
+            int newVersion;
+            boolean newModule;
+
+            ttsbegin;
+            moduleStorage = MXTXppInterpreterModuleRegistry::findStorage(moduleName, true);
+            module = MXTXppInterpreterModuleRegistry::unpackStorage(moduleStorage);
+            if (!module)
+            {
+                module = [StorageFormat, moduleName, 0, 1, conNull()];
+                newModule = true;
+            }
+
+            newVersion = conPeek(module, 4);
+            container versionRecord = [
+                newVersion,
+                sourceCode,
+                resolvedDependencies,
+                hash,
+                curUserId(),
+                DateTimeUtil::toStr(DateTimeUtil::utcNow()),
+                0];
+            container versions = conPeek(module, 5);
+            versions += [versionRecord];
+            module = conPoke(module, 4, newVersion + 1);
+            module = conPoke(module, 5, versions);
+            MXTXppInterpreterModuleRegistry::writeStorage(moduleStorage, moduleName, module);
+
+            if (newModule)
+            {
+                catalogStorage = MXTXppInterpreterModuleRegistry::findStorage(CatalogKey, true);
+                container catalog = MXTXppInterpreterModuleRegistry::unpackStorage(catalogStorage);
+                if (!catalog)
+                {
+                    catalog = [StorageFormat, conNull()];
+                }
+                container names = conPeek(catalog, 2);
+                names += [moduleName];
+                catalog = conPoke(catalog, 2, names);
+                MXTXppInterpreterModuleRegistry::writeStorage(catalogStorage, CatalogKey, catalog);
+            }
+            ttscommit;
+
+            if (_request.parmActivate())
+            {
+                MXTXppInterpreterModuleRequest activationRequest = new MXTXppInterpreterModuleRequest();
+                activationRequest.parmModuleName(moduleName);
+                activationRequest.parmVersion(newVersion);
+                return MXTXppInterpreterModuleRegistry::activate(activationRequest);
+            }
+
+            module = MXTXppInterpreterModuleRegistry::readModule(moduleName);
+            versionRecord = MXTXppInterpreterModuleRegistry::findVersion(module, newVersion);
+            MXTXppInterpreterModuleRegistry::fillResponse(response, module, versionRecord);
+            response.parmSuccess(true);
+        }
+        catch (Exception::CLRError)
+        {
+            if (appl.ttsLevel() > 0) ttsabort;
+            response.parmError(MXTXppInterpreterModuleRegistry::errorText('Module deployment failed.'));
+        }
+        catch
+        {
+            if (appl.ttsLevel() > 0) ttsabort;
+            response.parmError(infologLine() ? infolog.text(infologLine()) : 'Module deployment failed.');
+        }
+        return response;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>activate</Name>
+				<Source><![CDATA[
+    public static MXTXppInterpreterModuleResponse activate(MXTXppInterpreterModuleRequest _request)
+    {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+        MXTXppInterpreterModuleResponse response = new MXTXppInterpreterModuleResponse();
+        try
+        {
+            if (!_request || appl.ttsLevel() != 0)
+            {
+                throw error('A module request at TTS level zero is required.');
+            }
+            str moduleName = MXTXppInterpreterModuleRegistry::normalizeName(_request.parmModuleName());
+            container module = MXTXppInterpreterModuleRegistry::readModule(moduleName);
+            if (!module)
+            {
+                throw error(strFmt('Module %1 does not exist.', moduleName));
+            }
+            int version = _request.parmVersion();
+            if (!version)
+            {
+                version = conPeek(module, 4) - 1;
+            }
+            container versionRecord = MXTXppInterpreterModuleRegistry::findVersion(module, version);
+            if (!versionRecord)
+            {
+                throw error(strFmt('Module %1 version %2 does not exist.', moduleName, version));
+            }
+
+            // Full dependency validation and bytecode generation happen before the
+            // active pointer changes. A failed compile leaves the previous version live.
+            MXTXppInterpreterCompiledModule compiled =
+                MXTXppInterpreterModuleRegistry::getCompiled(moduleName, versionRecord);
+
+            int previousVersion = conPeek(module, 3);
+            SysLastValue storage;
+            ttsbegin;
+            storage = MXTXppInterpreterModuleRegistry::findStorage(moduleName, true);
+            module = MXTXppInterpreterModuleRegistry::unpackStorage(storage);
+            versionRecord = MXTXppInterpreterModuleRegistry::findVersion(module, version);
+            if (!versionRecord)
+            {
+                throw error('The staged version changed while it was being activated.');
+            }
+            module = conPoke(module, 3, version);
+
+            // Persist instruction metadata without changing immutable source/dependencies.
+            container versions = conPeek(module, 5);
+            for (int versionPosition = 1; versionPosition <= conLen(versions); versionPosition++)
+            {
+                container item = conPeek(versions, versionPosition);
+                if (conPeek(item, 1) == version)
+                {
+                    item = conPoke(item, 7, compiled.parmByteCode().Instructions.Count);
+                    versions = conPoke(versions, versionPosition, item);
+                    versionRecord = item;
+                    break;
+                }
+            }
+            module = conPoke(module, 5, versions);
+            MXTXppInterpreterModuleRegistry::writeStorage(storage, moduleName, module);
+            ttscommit;
+
+            MXTXppInterpreterModuleRegistry::fillResponse(response, module, versionRecord);
+            response.parmPreviousActiveVersion(previousVersion);
+            response.parmCacheHit(compiled.parmCacheHit());
+            response.parmCompileMicroseconds(compiled.parmCompileMicroseconds());
+            response.parmSuccess(true);
+        }
+        catch (Exception::CLRError)
+        {
+            if (appl.ttsLevel() > 0) ttsabort;
+            response.parmError(MXTXppInterpreterModuleRegistry::errorText('Module activation failed.'));
+        }
+        catch
+        {
+            if (appl.ttsLevel() > 0) ttsabort;
+            response.parmError(infologLine() ? infolog.text(infologLine()) : 'Module activation failed.');
+        }
+        return response;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>rollback</Name>
+				<Source><![CDATA[
+    public static MXTXppInterpreterModuleResponse rollback(MXTXppInterpreterModuleRequest _request)
+    {
+        MXTXppInterpreterModuleResponse response = new MXTXppInterpreterModuleResponse();
+        try
+        {
+            if (!_request)
+            {
+                throw error('A module request is required.');
+            }
+            str moduleName = MXTXppInterpreterModuleRegistry::normalizeName(_request.parmModuleName());
+            container module = MXTXppInterpreterModuleRegistry::readModule(moduleName);
+            if (!module)
+            {
+                throw error(strFmt('Module %1 does not exist.', moduleName));
+            }
+            int activeVersion = conPeek(module, 3);
+            int targetVersion = _request.parmVersion();
+            if (!targetVersion)
+            {
+                container versions = conPeek(module, 5);
+                for (int versionPosition = conLen(versions); versionPosition >= 1; versionPosition--)
+                {
+                    int candidate = conPeek(conPeek(versions, versionPosition), 1);
+                    if (candidate < activeVersion)
+                    {
+                        targetVersion = candidate;
+                        break;
+                    }
+                }
+            }
+            if (!targetVersion || targetVersion == activeVersion)
+            {
+                throw error(strFmt('Module %1 has no different rollback target.', moduleName));
+            }
+
+            MXTXppInterpreterModuleRequest activation = new MXTXppInterpreterModuleRequest();
+            activation.parmModuleName(moduleName);
+            activation.parmVersion(targetVersion);
+            response = MXTXppInterpreterModuleRegistry::activate(activation);
+            if (response.parmSuccess())
+            {
+                response.parmState('RolledBack');
+            }
+        }
+        catch (Exception::CLRError)
+        {
+            response.parmError(MXTXppInterpreterModuleRegistry::errorText('Module rollback failed.'));
+        }
+        catch
+        {
+            response.parmError(infologLine() ? infolog.text(infologLine()) : 'Module rollback failed.');
+        }
+        return response;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>get</Name>
+				<Source><![CDATA[
+    public static MXTXppInterpreterModuleResponse get(MXTXppInterpreterModuleRequest _request)
+    {
+        MXTXppInterpreterModuleResponse response = new MXTXppInterpreterModuleResponse();
+        try
+        {
+            if (!_request)
+            {
+                throw error('A module request is required.');
+            }
+            str moduleName = MXTXppInterpreterModuleRegistry::normalizeName(_request.parmModuleName());
+            container module = MXTXppInterpreterModuleRegistry::readModule(moduleName);
+            if (!module)
+            {
+                throw error(strFmt('Module %1 does not exist.', moduleName));
+            }
+            int version = _request.parmVersion();
+            if (!version)
+            {
+                version = conPeek(module, 3);
+                if (!version) version = conPeek(module, 4) - 1;
+            }
+            container versionRecord = MXTXppInterpreterModuleRegistry::findVersion(module, version);
+            if (!versionRecord)
+            {
+                throw error(strFmt('Module %1 version %2 does not exist.', moduleName, version));
+            }
+            MXTXppInterpreterModuleRegistry::fillResponse(response, module, versionRecord);
+            response.parmSuccess(true);
+        }
+        catch (Exception::CLRError)
+        {
+            response.parmError(MXTXppInterpreterModuleRegistry::errorText('Module lookup failed.'));
+        }
+        catch
+        {
+            response.parmError(infologLine() ? infolog.text(infologLine()) : 'Module lookup failed.');
+        }
+        return response;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>list</Name>
+				<Source><![CDATA[
+    public static MXTXppInterpreterModuleListResponse list()
+    {
+        MXTXppInterpreterModuleListResponse response = new MXTXppInterpreterModuleListResponse();
+        try
+        {
+            container catalog = MXTXppInterpreterModuleRegistry::unpackStorage(
+                MXTXppInterpreterModuleRegistry::findStorage(CatalogKey));
+            container names = catalog ? conPeek(catalog, 2) : conNull();
+            List modules = new List(Types::String);
+            for (int namePosition = 1; namePosition <= conLen(names); namePosition++)
+            {
+                str moduleName = conPeek(names, namePosition);
+                container module = MXTXppInterpreterModuleRegistry::readModule(moduleName);
+                if (module)
+                {
+                    modules.addEnd(strFmt('%1|active=%2|latest=%3',
+                        moduleName, conPeek(module, 3), conPeek(module, 4) - 1));
+                }
+            }
+            response.parmModules(modules);
+            response.parmSuccess(true);
+        }
+        catch (Exception::CLRError)
+        {
+            response.parmError(MXTXppInterpreterModuleRegistry::errorText('Module list failed.'));
+        }
+        catch
+        {
+            response.parmError(infologLine() ? infolog.text(infologLine()) : 'Module list failed.');
+        }
+        return response;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>execute</Name>
+				<Source><![CDATA[
+    public static MXTXppInterpreterExecutionResponse execute(MXTXppInterpreterModuleRequest _request)
+    {
+        MXTXppInterpreterScriptExecutionLog::checkSecurityRights();
+        MXTXppInterpreterExecutionResponse response = new MXTXppInterpreterExecutionResponse();
+        str requestId = _request ? _request.parmRequestId() : '';
+        if (!requestId) requestId = guid2Str(newGuid());
+        response.parmRequestId(requestId);
+
+        System.Diagnostics.Stopwatch totalWatch = System.Diagnostics.Stopwatch::StartNew();
+        try
+        {
+            if (!_request || appl.ttsLevel() != 0)
+            {
+                throw error('A module request at TTS level zero is required.');
+            }
+            str moduleName = MXTXppInterpreterModuleRegistry::normalizeName(_request.parmModuleName());
+            container module = MXTXppInterpreterModuleRegistry::readModule(moduleName);
+            if (!module)
+            {
+                throw error(strFmt('Module %1 does not exist.', moduleName));
+            }
+            int version = _request.parmVersion();
+            if (!version) version = conPeek(module, 3);
+            if (!version)
+            {
+                throw error(strFmt('Module %1 has no active version.', moduleName));
+            }
+            container versionRecord = MXTXppInterpreterModuleRegistry::findVersion(module, version);
+            if (!versionRecord)
+            {
+                throw error(strFmt('Module %1 version %2 does not exist.', moduleName, version));
+            }
+
+            MXTXppInterpreterCompiledModule compiled =
+                MXTXppInterpreterModuleRegistry::getCompiled(moduleName, versionRecord);
+            response.parmModuleName(moduleName);
+            response.parmModuleVersion(version);
+            response.parmCacheHit(compiled.parmCacheHit());
+            response.parmParseMicroseconds(compiled.parmParseMicroseconds());
+            response.parmCompileMicroseconds(compiled.parmCompileMicroseconds());
+            response.parmInstructionCount(compiled.parmByteCode().Instructions.Count);
+            MXTXppInterpreterExecutor::executeCompiledFast(compiled.parmByteCode(), response);
+        }
+        catch (Exception::CLRError)
+        {
+            response.parmError(MXTXppInterpreterModuleRegistry::errorText('Module execution failed.'));
+        }
+        catch
+        {
+            response.parmError(infologLine() ? infolog.text(infologLine()) : 'Module execution failed.');
+        }
+        totalWatch.Stop();
+        response.parmTotalMicroseconds(MXTXppInterpreterExecutor::elapsedMicroseconds(totalWatch));
+        return response;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxService xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppInterpreterService</Name>
+	<Class>MXTXppInterpreterService</Class>
+	<ExternalName>MXTXppInterpreterService</ExternalName>
+	<ServiceOperations>
+		<AxServiceOperation>
+			<Name>execute</Name>
+			<Method>execute</Method>
+		</AxServiceOperation>
+		<AxServiceOperation><Name>deployModule</Name><Method>deployModule</Method></AxServiceOperation>
+		<AxServiceOperation><Name>activateModule</Name><Method>activateModule</Method></AxServiceOperation>
+		<AxServiceOperation><Name>rollbackModule</Name><Method>rollbackModule</Method></AxServiceOperation>
+		<AxServiceOperation><Name>executeModule</Name><Method>executeModule</Method></AxServiceOperation>
+		<AxServiceOperation><Name>getModule</Name><Method>getModule</Method></AxServiceOperation>
+		<AxServiceOperation><Name>listModules</Name><Method>listModules</Method></AxServiceOperation>
+	</ServiceOperations>
+</AxService>

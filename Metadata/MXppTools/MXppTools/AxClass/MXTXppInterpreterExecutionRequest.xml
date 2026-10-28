@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>MXTXppInterpreterExecutionRequest</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// Request contract for rollback-only, resident X++ interpreter execution.
+/// </summary>
+[DataContract]
+public final class MXTXppInterpreterExecutionRequest
+{
+    str sourceCode;
+    str requestId;
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>parmSourceCode</Name>
+				<Source><![CDATA[
+    [DataMember("SourceCode")]
+    public str parmSourceCode(str _sourceCode = sourceCode)
+    {
+        sourceCode = _sourceCode;
+        return sourceCode;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>parmRequestId</Name>
+				<Source><![CDATA[
+    [DataMember("RequestId")]
+    public str parmRequestId(str _requestId = requestId)
+    {
+        requestId = _requestId;
+        return requestId;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

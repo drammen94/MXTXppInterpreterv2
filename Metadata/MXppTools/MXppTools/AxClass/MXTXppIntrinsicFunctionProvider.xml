@@ -68,6 +68,50 @@ internal final class MXTXppIntrinsicFunctionProvider implements XppInterpreter.I
 ]]></Source>
 			</Method>
 			<Method>
+				<Name>mapStr</Name>
+				<Source><![CDATA[
+    public str mapStr(System.String mapName)
+    {
+        MXTXppIntrinsicFunctionHelper::validateMapName(mapName);
+        return mapName;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>viewStr</Name>
+				<Source><![CDATA[
+    public str viewStr(System.String viewName)
+    {
+        MXTXppIntrinsicFunctionHelper::validateViewName(viewName);
+        return viewName;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>serviceStr</Name>
+				<Source><![CDATA[
+    public str serviceStr(System.String serviceName)
+    {
+        MXTXppIntrinsicFunctionHelper::validateServiceName(serviceName);
+        return serviceName;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>serviceOperationStr</Name>
+				<Source><![CDATA[
+    public str serviceOperationStr(System.String serviceName, System.String operationName)
+    {
+        MXTXppIntrinsicFunctionHelper::validateServiceName(serviceName);
+        return operationName;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
 				<Name>tableStr</Name>
 				<Source><![CDATA[
     public str tableStr(str name)
@@ -236,7 +280,30 @@ internal final class MXTXppIntrinsicFunctionProvider implements XppInterpreter.I
 				<Source><![CDATA[
     public str dataEntityDataSourceStr(System.String dataEntity, System.String dataSource)
     {
+        MXTXppIntrinsicFunctionHelper::validateDataEntityDataSource(dataEntity, dataSource);
         return dataSource;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dataEntityStr</Name>
+				<Source><![CDATA[
+    public str dataEntityStr(System.String dataEntity)
+    {
+        MXTXppIntrinsicFunctionHelper::validateDataEntityViewName(dataEntity);
+        return dataEntity;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dataEntityViewStr</Name>
+				<Source><![CDATA[
+    public str dataEntityViewStr(System.String dataEntityView)
+    {
+        MXTXppIntrinsicFunctionHelper::validateDataEntityViewName(dataEntityView);
+        return dataEntityView;
     }
 
 ]]></Source>
@@ -383,6 +450,7 @@ internal final class MXTXppIntrinsicFunctionProvider implements XppInterpreter.I
 				<Source><![CDATA[
     public str formControlStr(System.String formName, System.String controlName)
     {
+        MXTXppIntrinsicFunctionHelper::validateFormControl(formName, controlName);
         return controlName;
     }
 
@@ -393,6 +461,7 @@ internal final class MXTXppIntrinsicFunctionProvider implements XppInterpreter.I
 				<Source><![CDATA[
     public str formDataFieldStr(System.String formName, System.String dataSourceName, System.String dataFieldName)
     {
+        MXTXppIntrinsicFunctionHelper::validateFormDataField(formName, dataSourceName, dataFieldName);
         return dataFieldName;
     }
 
@@ -403,6 +472,7 @@ internal final class MXTXppIntrinsicFunctionProvider implements XppInterpreter.I
 				<Source><![CDATA[
     public str formDataSourceStr(System.String formName, System.String dataSourceName)
     {
+        MXTXppIntrinsicFunctionHelper::validateFormDataSource(formName, dataSourceName);
         return dataSourceName;
     }
 
@@ -413,6 +483,7 @@ internal final class MXTXppIntrinsicFunctionProvider implements XppInterpreter.I
 				<Source><![CDATA[
     public str formMethodStr(System.String formName, System.String methodName)
     {
+        MXTXppIntrinsicFunctionHelper::validateFormMethod(formName, methodName);
         return methodName;
     }
 
@@ -433,6 +504,7 @@ internal final class MXTXppIntrinsicFunctionProvider implements XppInterpreter.I
 				<Source><![CDATA[
     public int indexNum(System.String tableName, System.String indexName)
     {
+        MXTXppIntrinsicFunctionHelper::validateIndexName(tableName, indexName);
         return indexName2Id(tableName2Id(tableName), indexName);
     }
 
@@ -443,6 +515,7 @@ internal final class MXTXppIntrinsicFunctionProvider implements XppInterpreter.I
 				<Source><![CDATA[
     public str indexStr(System.String talbeName, System.String indexName)
     {
+        MXTXppIntrinsicFunctionHelper::validateIndexName(talbeName, indexName);
         return indexName;
     }
 
@@ -615,6 +688,7 @@ internal final class MXTXppIntrinsicFunctionProvider implements XppInterpreter.I
 				<Source><![CDATA[
     public str tableFieldGroupStr(System.String talbeName, System.String fieldGroupName)
     {
+        MXTXppIntrinsicFunctionHelper::validateTableFieldGroup(talbeName, fieldGroupName);
         return fieldGroupName;
     }
 
@@ -625,6 +699,7 @@ internal final class MXTXppIntrinsicFunctionProvider implements XppInterpreter.I
 				<Source><![CDATA[
     public str tableMethodStr(System.String tableName, System.String methodName)
     {
+        MXTXppIntrinsicFunctionHelper::validateTableMethod(tableName, methodName, false);
         return methodName;
     }
 
@@ -645,6 +720,7 @@ internal final class MXTXppIntrinsicFunctionProvider implements XppInterpreter.I
 				<Source><![CDATA[
     public str tableStaticMethodStr(System.String tableName, System.String methodName)
     {
+        MXTXppIntrinsicFunctionHelper::validateTableMethod(tableName, methodName, true);
         return methodName;
     }
 
