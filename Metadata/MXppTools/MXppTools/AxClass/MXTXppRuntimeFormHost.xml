@@ -19,6 +19,9 @@
 ///     boolean ControlName_modified(FormControl _control)
 ///     boolean ControlName_validate(FormStringControl _control)
 ///     void ControlName_lookup(FormStringControl _control)
+///
+/// Event methods are wired by control name on the initialized form, so they work for controls added
+/// by the builder, by the native form API, or bound to data source fields.
 /// </summary>
 public final class MXTXppRuntimeFormHost
 {
@@ -34,12 +37,17 @@ public final class MXTXppRuntimeFormHost
 				<Name>main</Name>
 				<Source><![CDATA[
     /// <summary>
-    /// Entry point of the MXTXppRuntimeForms menu item. A menu item parameter "Module/Class" opens
-    /// that form directly; otherwise the launcher lists every runtime form of the active modules.
+    /// Entry point of the MXTXppRuntimeForms menu item. A menu item parameter "Module/Class", or a
+    /// deep link ...&mi=action:MXTXppRuntimeForms&form=Module/Class, opens that form directly;
+    /// otherwise the launcher lists every runtime form of the active modules.
     /// </summary>
     public static void main(Args _args)
     {
         str target = _args ? _args.parm() : '';
+        if (!target)
+        {
+            target = XppInterpreter.Interpreter.RuntimeFormCatalog::TargetFromUrl(MXTXppRuntimeFormHost::currentUrl());
+        }
         int separator = strScan(target, '/', 1, strLen(target));
 
         if (separator > 1)
@@ -109,6 +117,7 @@ public final class MXTXppRuntimeFormHost
 
         formRun = classFactory.formRunClass(args);
         formRun.init();
+        this.wireHandlers();
 
         if (this.handles('init'))
         {
@@ -127,7 +136,8 @@ public final class MXTXppRuntimeFormHost
 				<Source><![CDATA[
     /// <summary>
     /// A runtime form with one button per runtime form of every active module: the menu for forms
-    /// that have no AOT menu item.
+    /// that have no AOT menu item. Each button shows the form's deep link, which can be bookmarked,
+    /// added to favorites or pinned to a workspace.
     /// </summary>
     public static FormRun openLauncher()
     {
@@ -143,6 +153,7 @@ public final class MXTXppRuntimeFormHost
 
         container modules = MXTXppInterpreterModuleRegistry::activeModuleNames();
         int buttonCount;
+        str hostUrl = Microsoft.Dynamics.ApplicationPlatform.Environment.EnvironmentFactory::GetApplicationEnvironment().Infrastructure.HostUrl;
 
         for (int modulePosition = 1; modulePosition <= conLen(modules); modulePosition++)
         {
@@ -190,6 +201,9 @@ public final class MXTXppRuntimeFormHost
                 FormBuildButtonControl button = group.addControl(FormControlType::Button, buttonName);
                 button.text(subStr(line, tab + 1, strLen(line)));
                 button.registerOverrideMethod(methodStr(FormButtonControl, clicked), methodStr(MXTXppRuntimeFormHost, launcherClicked), host);
+
+                FormBuildStaticTextControl link = group.addControl(FormControlType::StaticText, strFmt('Link%1', buttonCount));
+                link.text(XppInterpreter.Interpreter.RuntimeFormCatalog::Link(hostUrl, curExt(), moduleName, subStr(line, 1, tab - 1)));
             }
         }
 
@@ -199,6 +213,137 @@ public final class MXTXppRuntimeFormHost
         }
 
         return host.run(form, null);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>currentUrl</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// The URL the client navigated to. Looked up by name so that the model builds on platform
+    /// versions without URLUtility; there the menu item opens the launcher instead.
+    /// </summary>
+    private static str currentUrl()
+    {
+        try
+        {
+            DictClass urlUtility = new DictClass(className2Id('URLUtility'));
+            return urlUtility ? any2Str(urlUtility.callStatic('getUrl')) : '';
+        }
+        catch
+        {
+            return '';
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>wireHandlers</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// Wires every ControlName_event method of the controller to the control of that name on the
+    /// initialized form, whether the builder, the native form API or a data binding created it.
+    /// </summary>
+    private void wireHandlers()
+    {
+        if (controller == null)
+        {
+            return;
+        }
+
+        Set wired = new Set(Types::String);
+        ListEnumerator lines = strSplit(controller.Handlers(), '\n').getEnumerator();
+
+        while (lines.moveNext())
+        {
+            str line = lines.current();
+            int tab = strScan(line, '\t', 1, strLen(line));
+            if (tab <= 1 || wired.in(line))
+            {
+                continue;
+            }
+            wired.add(line);
+
+            str controlName = subStr(line, 1, tab - 1);
+            str eventName = subStr(line, tab + 1, strLen(line));
+            FormControl control = formRun.design().controlName(controlName);
+
+            if (!control)
+            {
+                warning(strFmt('%1_%2 is not wired: the form has no control named %1.', controlName, eventName));
+                continue;
+            }
+
+            str hostMethod = MXTXppRuntimeFormHost::hostMethod(classIdGet(control), eventName);
+            if (!hostMethod)
+            {
+                warning(strFmt('%1_%2 is not wired: %3 controls have no %2 event.', controlName, eventName, classId2Name(classIdGet(control))));
+                continue;
+            }
+
+            // Late bound: registerOverrideMethod is declared on each concrete control class
+            Object target = control;
+            target.registerOverrideMethod(eventName, hostMethod, this);
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>hostMethod</Name>
+				<Source><![CDATA[
+    /// <summary>The method of this class that forwards an event of a control class, or an empty string.</summary>
+    private static str hostMethod(ClassId _controlClass, str _event)
+    {
+        switch (_event)
+        {
+            case 'clicked':
+                switch (_controlClass)
+                {
+                    case classNum(FormButtonControl):           return methodStr(MXTXppRuntimeFormHost, buttonClicked);
+                    case classNum(FormCommandButtonControl):    return methodStr(MXTXppRuntimeFormHost, commandButtonClicked);
+                    case classNum(FormMenuButtonControl):       return methodStr(MXTXppRuntimeFormHost, menuButtonClicked);
+                }
+                break;
+
+            case 'modified':
+                switch (_controlClass)
+                {
+                    case classNum(FormStringControl):           return methodStr(MXTXppRuntimeFormHost, stringModified);
+                    case classNum(FormIntControl):              return methodStr(MXTXppRuntimeFormHost, intModified);
+                    case classNum(FormInt64Control):            return methodStr(MXTXppRuntimeFormHost, int64Modified);
+                    case classNum(FormRealControl):             return methodStr(MXTXppRuntimeFormHost, realModified);
+                    case classNum(FormDateControl):             return methodStr(MXTXppRuntimeFormHost, dateModified);
+                    case classNum(FormCheckBoxControl):         return methodStr(MXTXppRuntimeFormHost, checkBoxModified);
+                    case classNum(FormComboBoxControl):         return methodStr(MXTXppRuntimeFormHost, comboBoxModified);
+                }
+                break;
+
+            case 'validate':
+                switch (_controlClass)
+                {
+                    case classNum(FormStringControl):           return methodStr(MXTXppRuntimeFormHost, stringValidate);
+                    case classNum(FormIntControl):              return methodStr(MXTXppRuntimeFormHost, intValidate);
+                    case classNum(FormInt64Control):            return methodStr(MXTXppRuntimeFormHost, int64Validate);
+                    case classNum(FormRealControl):             return methodStr(MXTXppRuntimeFormHost, realValidate);
+                    case classNum(FormDateControl):             return methodStr(MXTXppRuntimeFormHost, dateValidate);
+                }
+                break;
+
+            case 'lookup':
+                switch (_controlClass)
+                {
+                    case classNum(FormStringControl):           return methodStr(MXTXppRuntimeFormHost, stringLookup);
+                    case classNum(FormIntControl):              return methodStr(MXTXppRuntimeFormHost, intLookup);
+                    case classNum(FormInt64Control):            return methodStr(MXTXppRuntimeFormHost, int64Lookup);
+                    case classNum(FormDateControl):             return methodStr(MXTXppRuntimeFormHost, dateLookup);
+                }
+                break;
+        }
+
+        return '';
     }
 
 ]]></Source>
@@ -311,6 +456,28 @@ public final class MXTXppRuntimeFormHost
 ]]></Source>
 			</Method>
 			<Method>
+				<Name>commandButtonClicked</Name>
+				<Source><![CDATA[
+    public void commandButtonClicked(FormCommandButtonControl _control)
+    {
+        _control.clicked();
+        this.call(_control.name() + '_clicked', _control);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>menuButtonClicked</Name>
+				<Source><![CDATA[
+    public void menuButtonClicked(FormMenuButtonControl _control)
+    {
+        _control.clicked();
+        this.call(_control.name() + '_clicked', _control);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
 				<Name>stringModified</Name>
 				<Source><![CDATA[
     public boolean stringModified(FormStringControl _control)
@@ -336,6 +503,80 @@ public final class MXTXppRuntimeFormHost
 				<Name>stringLookup</Name>
 				<Source><![CDATA[
     public void stringLookup(FormStringControl _control)
+    {
+        this.call(_control.name() + '_lookup', _control);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>intValidate</Name>
+				<Source><![CDATA[
+    public boolean intValidate(FormIntControl _control)
+    {
+        boolean ret = _control.validate();
+        return ret && this.decide(_control.name() + '_validate', _control, ret);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>int64Validate</Name>
+				<Source><![CDATA[
+    public boolean int64Validate(FormInt64Control _control)
+    {
+        boolean ret = _control.validate();
+        return ret && this.decide(_control.name() + '_validate', _control, ret);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>realValidate</Name>
+				<Source><![CDATA[
+    public boolean realValidate(FormRealControl _control)
+    {
+        boolean ret = _control.validate();
+        return ret && this.decide(_control.name() + '_validate', _control, ret);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dateValidate</Name>
+				<Source><![CDATA[
+    public boolean dateValidate(FormDateControl _control)
+    {
+        boolean ret = _control.validate();
+        return ret && this.decide(_control.name() + '_validate', _control, ret);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>intLookup</Name>
+				<Source><![CDATA[
+    public void intLookup(FormIntControl _control)
+    {
+        this.call(_control.name() + '_lookup', _control);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>int64Lookup</Name>
+				<Source><![CDATA[
+    public void int64Lookup(FormInt64Control _control)
+    {
+        this.call(_control.name() + '_lookup', _control);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>dateLookup</Name>
+				<Source><![CDATA[
+    public void dateLookup(FormDateControl _control)
     {
         this.call(_control.name() + '_lookup', _control);
     }

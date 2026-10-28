@@ -162,9 +162,15 @@ The controller's methods are all optional:
 * `str caption()`: the form caption.
 * `void build(MXTXppRuntimeFormBuilder _builder)`: lays out the form. The builder provides `addDataSource`, `addGroup`, `addTab`/`addTabPage`, `addString`, `addInt`, `addInt64`, `addReal`, `addDate`, `addCheckBox`, `addComboBox` (base enum), `addButton`, `addStatic`, `addGrid`/`addGridField` and `addField` (bound to a data source field). `form()` and `design()` return the native `Form`/`FormBuildDesign` for anything else.
 * `void init(FormRun _formRun)`: runs after the form is initialized and before it is shown.
-* `ControlName_clicked`, `ControlName_modified`, `ControlName_validate` and `ControlName_lookup` are called with the control when the event fires. `modified` and `validate` can return a boolean to override the native result. Events are wired by name only for controls added through the builder.
+* `ControlName_clicked`, `ControlName_modified`, `ControlName_validate` and `ControlName_lookup` are called with the control when the event fires. `modified` and `validate` can return a boolean to override the native result. Events are wired by control name after the form is initialized, so they work the same for controls from the builder, from the native form API, and for fields and grid columns bound to a data source.
 
-Every event runs with fresh execution limits (1,000,000 instructions and 30 seconds per event), and database work follows the normal form rules: nothing is rolled back by the host. Opening the action menu item with the parameter `Module/Class` opens one form directly, and `MXTXppRuntimeFormHost::open('Module', 'Class')` opens one from code. A new AOT menu item can still point at a runtime form this way, but that menu item itself needs a build.
+Every event runs with fresh execution limits (1,000,000 instructions and 30 seconds per event), and database work follows the normal form rules: nothing is rolled back by the host. Every runtime form has its own deep link, shown next to its button in the launcher:
+
+```
+https://<environment>/?cmp=usmf&mi=action:MXTXppRuntimeForms&form=Demo.Forms/CustomerLookupForm
+```
+
+Bookmark it, add it to favorites, pin it to a workspace or put it in an existing menu's link. It opens that form directly, still with no AOT object per form. `MXTXppRuntimeFormHost::open('Module', 'Class')` opens one from code, and an action menu item parameter `Module/Class` does the same.
 
 ## Interpreter
 

@@ -5,10 +5,9 @@
 		<Declaration><![CDATA[
 /// <summary>
 /// Passed to the build(MXTXppRuntimeFormBuilder) method of an interpreted [RuntimeForm] class.
-/// Adds data sources and controls to a form that exists only at runtime, and wires control
-/// events to the interpreted class by name: a method ControlName_clicked, ControlName_modified,
-/// ControlName_validate or ControlName_lookup is called with the control when that event fires.
-/// form() and design() give the full native form build API for anything the helpers do not cover.
+/// Adds data sources and controls to a form that exists only at runtime. form() and design()
+/// give the full native form build API for anything the helpers do not cover. Control events are
+/// wired by the host on the finished form, whichever way a control was added.
 /// </summary>
 public final class MXTXppRuntimeFormBuilder
 {
@@ -80,16 +79,6 @@ public final class MXTXppRuntimeFormBuilder
     private Object parent(Object _parent)
     {
         return _parent ? _parent : design;
-    }
-
-]]></Source>
-			</Method>
-			<Method>
-				<Name>handles</Name>
-				<Source><![CDATA[
-    private boolean handles(str _controlName, str _event)
-    {
-        return host.handles(_controlName + '_' + _event);
     }
 
 ]]></Source>
@@ -195,10 +184,6 @@ public final class MXTXppRuntimeFormBuilder
         Object parent = this.parent(_parent);
         FormBuildButtonControl control = parent.addControl(FormControlType::Button, _name);
         control.text(_text);
-        if (this.handles(_name, 'clicked'))
-        {
-            control.registerOverrideMethod(methodStr(FormButtonControl, clicked), methodStr(MXTXppRuntimeFormHost, buttonClicked), host);
-        }
         return control;
     }
 
@@ -212,18 +197,6 @@ public final class MXTXppRuntimeFormBuilder
         Object parent = this.parent(_parent);
         FormBuildStringControl control = parent.addControl(FormControlType::String, _name);
         control.label(_label ? _label : _name);
-        if (this.handles(_name, 'modified'))
-        {
-            control.registerOverrideMethod(methodStr(FormStringControl, modified), methodStr(MXTXppRuntimeFormHost, stringModified), host);
-        }
-        if (this.handles(_name, 'validate'))
-        {
-            control.registerOverrideMethod(methodStr(FormStringControl, validate), methodStr(MXTXppRuntimeFormHost, stringValidate), host);
-        }
-        if (this.handles(_name, 'lookup'))
-        {
-            control.registerOverrideMethod(methodStr(FormStringControl, lookup), methodStr(MXTXppRuntimeFormHost, stringLookup), host);
-        }
         return control;
     }
 
@@ -237,10 +210,6 @@ public final class MXTXppRuntimeFormBuilder
         Object parent = this.parent(_parent);
         FormBuildIntControl control = parent.addControl(FormControlType::Integer, _name);
         control.label(_label ? _label : _name);
-        if (this.handles(_name, 'modified'))
-        {
-            control.registerOverrideMethod(methodStr(FormIntControl, modified), methodStr(MXTXppRuntimeFormHost, intModified), host);
-        }
         return control;
     }
 
@@ -254,10 +223,6 @@ public final class MXTXppRuntimeFormBuilder
         Object parent = this.parent(_parent);
         FormBuildInt64Control control = parent.addControl(FormControlType::Int64, _name);
         control.label(_label ? _label : _name);
-        if (this.handles(_name, 'modified'))
-        {
-            control.registerOverrideMethod(methodStr(FormInt64Control, modified), methodStr(MXTXppRuntimeFormHost, int64Modified), host);
-        }
         return control;
     }
 
@@ -271,10 +236,6 @@ public final class MXTXppRuntimeFormBuilder
         Object parent = this.parent(_parent);
         FormBuildRealControl control = parent.addControl(FormControlType::Real, _name);
         control.label(_label ? _label : _name);
-        if (this.handles(_name, 'modified'))
-        {
-            control.registerOverrideMethod(methodStr(FormRealControl, modified), methodStr(MXTXppRuntimeFormHost, realModified), host);
-        }
         return control;
     }
 
@@ -288,10 +249,6 @@ public final class MXTXppRuntimeFormBuilder
         Object parent = this.parent(_parent);
         FormBuildDateControl control = parent.addControl(FormControlType::Date, _name);
         control.label(_label ? _label : _name);
-        if (this.handles(_name, 'modified'))
-        {
-            control.registerOverrideMethod(methodStr(FormDateControl, modified), methodStr(MXTXppRuntimeFormHost, dateModified), host);
-        }
         return control;
     }
 
@@ -305,10 +262,6 @@ public final class MXTXppRuntimeFormBuilder
         Object parent = this.parent(_parent);
         FormBuildCheckBoxControl control = parent.addControl(FormControlType::CheckBox, _name);
         control.label(_label ? _label : _name);
-        if (this.handles(_name, 'modified'))
-        {
-            control.registerOverrideMethod(methodStr(FormCheckBoxControl, modified), methodStr(MXTXppRuntimeFormHost, checkBoxModified), host);
-        }
         return control;
     }
 
@@ -331,10 +284,6 @@ public final class MXTXppRuntimeFormBuilder
         FormBuildComboBoxControl control = parent.addControl(FormControlType::ComboBox, _name);
         control.enumType(enumName2Id(_enumName));
         control.label(_label ? _label : _name);
-        if (this.handles(_name, 'modified'))
-        {
-            control.registerOverrideMethod(methodStr(FormComboBoxControl, modified), methodStr(MXTXppRuntimeFormHost, comboBoxModified), host);
-        }
         return control;
     }
 

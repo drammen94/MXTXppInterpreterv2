@@ -36,6 +36,39 @@ namespace XppInterpreter.Interpreter
             return text.ToString();
         }
 
+        /// <summary>
+        /// The "Module/Class" target of a deep link such as
+        /// https://host/?cmp=usmf&amp;mi=action:MXTXppRuntimeForms&amp;form=Demo.Forms/CustomerLookupForm,
+        /// or an empty string when the URL has no form parameter.
+        /// </summary>
+        public static string TargetFromUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url) || !Uri.TryCreate(url, UriKind.Absolute, out Uri uri))
+            {
+                return string.Empty;
+            }
+
+            foreach (string pair in uri.Query.TrimStart('?').Split('&'))
+            {
+                int equals = pair.IndexOf('=');
+
+                if (equals > 0 && string.Equals(pair.Substring(0, equals), "form", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Uri.UnescapeDataString(pair.Substring(equals + 1).Replace('+', ' '));
+                }
+            }
+
+            return string.Empty;
+        }
+
+        /// <summary>The deep link that opens one runtime form in a company.</summary>
+        public static string Link(string hostUrl, string company, string moduleName, string className)
+        {
+            return (hostUrl ?? string.Empty).TrimEnd('/')
+                + "/?cmp=" + Uri.EscapeDataString(company ?? string.Empty)
+                + "&mi=action:MXTXppRuntimeForms&form=" + Uri.EscapeDataString(moduleName + "/" + className);
+        }
+
         internal static bool IsForm(RuntimeClass runtimeClass)
         {
             return runtimeClass.Attributes.Any(a => Is(a, "RuntimeForm") || Is(a, "RuntimeMenuItem"));
@@ -104,6 +137,36 @@ namespace XppInterpreter.Interpreter
         public bool Has(string methodName)
         {
             return methodName != null && _class.FindDispatchMethod(methodName, isStatic: false) != null;
+        }
+
+        private static readonly string[] ControlEvents = { "clicked", "modified", "validate", "lookup" };
+
+        /// <summary>
+        /// One "ControlName\tevent" line per handler the controller declares (ControlName_clicked and
+        /// so on), so the host can wire those events on whatever controls the form ends up with.
+        /// </summary>
+        public string Handlers()
+        {
+            var text = new StringBuilder();
+
+            for (RuntimeClass current = _class; current != null; current = current.BaseClass)
+            {
+                foreach (RuntimeClassMethod method in current.Methods)
+                {
+                    if (method.IsStatic) continue;
+
+                    int separator = method.Name.LastIndexOf('_');
+                    if (separator <= 0) continue;
+
+                    string eventName = method.Name.Substring(separator + 1);
+                    if (ControlEvents.Any(e => string.Equals(e, eventName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        text.Append(method.Name.Substring(0, separator)).Append('\t').Append(eventName.ToLowerInvariant()).Append('\n');
+                    }
+                }
+            }
+
+            return text.ToString();
         }
 
         public object Call(string methodName)
